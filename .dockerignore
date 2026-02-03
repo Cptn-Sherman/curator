@@ -1,0 +1,12 @@
+target/
+.git/
+.gitignore
+.cargo/
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+.idea/
+*.iml
+Cargo.lock
