@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Curator - Settings</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Curator Settings</h1>
+        </div>
+
+        <div class="content">
+            <form id="settings-form">
+                <div class="section">
+                    <h2>Curator Service</h2>
+                    <div class="form-group">
+                        <label for="curator-url">Service URL</label>
+                        <input 
+                            type="url" 
+                            id="curator-url" 
+                            placeholder="http://localhost:8080"
+                            required
+                        >
+                        <p class="help-text">The URL where your Curator service is running</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>Subscriptions</h2>
+                    <div id="subscriptions-list" class="list"></div>
+                    <button type="button" id="add-sub-btn" class="btn btn-secondary">Add Subscription</button>
+                </div>
+
+                <div class="section">
+                    <h2>Subscription Form</h2>
+                    <div id="subscription-form" style="display: none;">
+                        <div class="form-group">
+                            <label for="sub-name">Name</label>
+                            <input type="text" id="sub-name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="sub-url">URL</label>
+                            <input type="url" id="sub-url" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="sub-interval">Polling Interval (seconds)</label>
+                            <input type="number" id="sub-interval" value="3600" min="60" required>
+                        </div>
+                        <button type="button" id="save-sub-btn" class="btn btn-primary">Save Subscription</button>
+                        <button type="button" id="cancel-sub-btn" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>Ignored Domains</h2>
+                    <p class="help-text">Tabs from these domains will be unchecked by default in Batch mode.</p>
+                    <div id="ignored-domains-list" class="list"></div>
+                    <div class="ignored-add-row">
+                        <input type="text" id="ignored-domain-input" placeholder="example.com">
+                        <button type="button" id="add-ignored-domain-btn" class="btn btn-secondary">Add</button>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                    <div id="save-message" class="message"></div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>

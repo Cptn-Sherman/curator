@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Curator</h1>
+        </div>
+
+        <div id="progress-strip" class="progress-strip">
+            <div class="progress-bar-track">
+                <div id="progress-bar-fill" class="progress-bar-fill"></div>
+            </div>
+            <span id="progress-label" class="progress-label">—</span>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="save">Save</button>
+            <button class="tab-btn" data-tab="status">Server</button>
+            <button class="tab-btn" data-tab="settings">Settings</button>
+        </div>
+
+        <!-- Save Tab -->
+        <div id="save" class="tab-content active">
+            <div class="form-group">
+                <label for="url">URL:</label>
+                <input type="text" id="url" placeholder="https://example.com">
+            </div>
+
+            <div class="form-group">
+                <label for="subscription">Subscription:</label>
+                <select id="subscription">
+                    <option value="">No Subscription</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button id="save-link-btn" class="btn btn-primary">Save</button>
+                <button id="save-close-btn" class="btn btn-secondary">Save & Close Tab</button>
+            </div>
+            <div id="save-message" class="message"></div>
+
+            <div class="save-batch-divider"></div>
+
+            <div class="batch-toolbar">
+                <div class="batch-selection-controls">
+                    <button id="batch-select-all" class="btn-link">Select all</button>
+                    <span class="batch-sep">·</span>
+                    <button id="batch-deselect-all" class="btn-link">Deselect all</button>
+                </div>
+                <span id="batch-selected-count" class="batch-count">0 selected</span>
+            </div>
+            <div id="batch-tabs-list" class="batch-list">
+                <p class="batch-empty">Loading tabs…</p>
+            </div>
+            <div id="batch-message" class="message"></div>
+            <div class="batch-actions">
+                <button id="batch-save-btn" class="btn btn-primary" disabled>Save Selected</button>
+                <button id="batch-save-close-btn" class="btn btn-secondary" disabled>Save & Close</button>
+            </div>
+        </div>
+
+        <!-- Status Tab -->
+        <div id="status" class="tab-content">
+            <div class="status-section">
+                <h3>Server Connection</h3>
+                <div class="status-item">
+                    <span>Server URL:</span>
+                    <span id="server-url">-</span>
+                </div>
+                <div class="status-item">
+                    <span>Status:</span>
+                    <span id="connection-status">-</span>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <h3>Stats</h3>
+                <div class="status-item">
+                    <span>Database:</span>
+                    <span id="db-name">-</span>
+                </div>
+                <div class="status-item">
+                    <span>Total Links:</span>
+                    <span id="total-links">-</span>
+                </div>
+                <div class="status-item">
+                    <span>Unprocessed:</span>
+                    <span id="unprocessed-count">-</span>
+                </div>
+                <div class="status-item">
+                    <span>Processing:</span>
+                    <label class="processing-checkbox-label"><input type="checkbox" id="processing-checkbox"> Enabled</label>
+                </div>
+                <div class="status-item">
+                    <span>Subscriptions:</span>
+                    <span id="subscriptions-count">-</span>
+                </div>
+
+                <button id="refresh-status-btn" class="btn btn-secondary">Refresh</button>
+                <div id="management-message" class="message"></div>
+            </div>
+            <div id="connection-message" class="message" style="margin-top: 20px;"></div>
+        </div>
+
+        <!-- Settings Tab (merged Manage + Options) -->
+        <div id="settings" class="tab-content">
+<div class="settings-section">
+                <h3>Server</h3>
+                <div class="form-group">
+                    <label for="settings-url">Service URL</label>
+                    <input type="text" id="settings-url" placeholder="http://localhost:8080">
+                </div>
+                <button id="settings-save-url-btn" class="btn btn-primary">Save URL</button>
+                <div id="settings-url-message" class="message"></div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Tabs</h3>
+                <div class="radio-group">
+                    <label><input type="radio" name="tab-scope" value="all"> All windows</label>
+                    <label><input type="radio" name="tab-scope" value="current"> Current window</label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Subscriptions</h3>
+                <div id="subscriptions-list" class="list"></div>
+                <div id="subscription-form" class="subscription-form" style="display:none">
+                    <div class="form-group">
+                        <label for="sub-name">Name</label>
+                        <input type="text" id="sub-name" placeholder="My Feed">
+                    </div>
+                    <div class="form-group">
+                        <label for="sub-url">URL</label>
+                        <input type="url" id="sub-url" placeholder="https://example.com/feed">
+                    </div>
+                    <div class="form-group">
+                        <label for="sub-interval">Polling interval (seconds)</label>
+                        <input type="number" id="sub-interval" value="3600" min="60">
+                    </div>
+                    <div class="button-group">
+                        <button id="save-sub-btn" class="btn btn-primary">Save</button>
+                        <button id="cancel-sub-btn" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </div>
+                <button id="add-subscription-btn" class="btn btn-secondary" style="margin-top:8px">Add Subscription</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Ignored Domains</h3>
+                <p class="settings-help">Unchecked by default in Batch mode.</p>
+                <div id="ignored-domains-list" class="list"></div>
+                <div class="ignored-add-row">
+                    <input type="text" id="ignored-domain-input" placeholder="example.com">
+                    <button id="add-ignored-domain-btn" class="btn btn-secondary">Add</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Backup</h3>
+                <button id="backup-btn" class="btn btn-secondary">Create Backup</button>
+                <div id="backup-message" class="message"></div>
+            </div>
+
+            <div class="settings-section settings-section--debug">
+                <h3>Debug</h3>
+                <button id="debug-reset-btn" class="btn btn-danger">Delete All Data</button>
+                <div id="debug-message" class="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

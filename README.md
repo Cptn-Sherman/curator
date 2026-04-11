@@ -1,129 +1,83 @@
-# curator
+# Curator - Content Management System
 
-Curator is a content downloader and organizer built using Rust
+A complete content management solution with a Rust backend server and Firefox browser extension.
 
-## Features
+## Project Structure
 
-- Ingest links for processing
-- Track link processing state
-- Manage subscriptions for automated polling
-- RESTful API for all operations
-- SQLite database with automated backups
-- Configurable via TOML
-
-## Setup
-
-1. Create a `config.toml` file:
-
-```toml
-[database]
-name = "curator.db"
-max_backups = 5
-
-[processor]
-thread_pool_size = 4
-enabled_on_start = true
-
-[server]
-host = "0.0.0.0"
-port = 8080
+```
+curator/
+├── server/          # Rust backend API server
+└── extension/       # Firefox browser extension
 ```
 
-2. Build and run:
+## Quick Start
+
+### Server Setup
 
 ```bash
-cargo build
+cd server
 cargo run
 ```
 
-The server will start on `http://0.0.0.0:8080`
+The server will start on `http://localhost:8080` by default.
 
-## API Usage
+Configuration is managed via `config.toml`:
+- Database settings
+- Server host and port
+- Processor thread pool and startup settings
 
-### Health Check
+### Extension Setup
+
+1. Navigate to Firefox's extension debugging page: `about:debugging#/runtime/this-firefox`
+2. Click "Load Temporary Add-on"
+3. Select `extension/manifest.json`
+
+**Configure the extension URL** in the extension settings to point to your server (default: `http://localhost:8080`)
+
+## Features
+
+### Server
+- **RESTful API** for all operations
+- **Link Management**: Ingest, track, and process links
+- **Subscriptions**: Manage content subscriptions with automated polling
+- **Database**: SQLite with automatic backups
+- **Processing**: Configurable background link processor
+
+### Extension
+- **Save Links**: Quickly save the current page or any link
+- **Manage Subscriptions**: View and manage content subscriptions
+- **Check Status**: Real-time stats about links, processing, and subscriptions
+- **Processing Control**: Enable/disable processing from extension
+- **Context Menu**: Right-click to save links/pages
+
+## API Endpoints
+
+- `GET /` - Service info
+- `GET /health` - Health check
+- `GET /graphql` - GraphQL health endpoint
+- `POST /ingest` - Ingest links
+- `GET /check` - Check if URL exists
+- `GET /processing/status` - Get processing status
+- `POST /processing/toggle` - Toggle processing
+- `GET /links/unprocessed` - Get unprocessed count
+- `GET /subscriptions` - List subscriptions
+- `POST /subscriptions` - Create subscription
+
+## Development
+
+### Requirements
+- Rust 1.70+
+- Firefox (for extension testing)
+
+### Building
 
 ```bash
-GET /health
+cd server
+cargo build --release
 ```
 
-Returns server status.
+The release binary will be in `server/target/release/curator`.
 
-### Ingest Links
+## License
 
-```bash
-POST /ingest
-Content-Type: application/json
-
-{
-  "links": ["https://example.com", "https://example.org"],
-  "subscription_id": "optional-subscription-id"
-}
-```
-
-Returns ingested link IDs and duplicate count.
-
-### Check Link Exists
-
-```bash
-GET /check?url=https://example.com
-```
-
-Returns whether a URL exists in the database.
-
-### Link Processing
-
-**Get processing status:**
-```bash
-GET /processing/status
-```
-
-**Toggle processing on/off:**
-```bash
-POST /processing/toggle
-```
-
-**Get unprocessed links count:**
-```bash
-GET /links/unprocessed
-```
-
-### Subscriptions
-
-**List all subscriptions:**
-```bash
-GET /subscriptions
-```
-
-**Create a subscription:**
-```bash
-POST /subscriptions
-Content-Type: application/json
-
-{
-  "name": "My Feed",
-  "url": "https://example.com/feed",
-  "polling_interval_seconds": 3600
-}
-```
-
-## Database
-
-The database is automatically initialized on first run with the following structure:
-
-- `links` - Stores URLs to be processed
-  - `id` - Unique identifier
-  - `url` - Link URL
-  - `created_at` - Creation timestamp
-  - `processed_at` - Processing completion timestamp (null if unprocessed)
-  - `subscription_id` - Associated subscription (optional)
-
-- `subscriptions` - Manages content sources
-  - `id` - Unique identifier
-  - `name` - Subscription name
-  - `url` - Source URL to poll
-  - `polling_interval_seconds` - How often to check for new content
-  - `last_polled_at` - Last polling timestamp
-  - `created_at` - Creation timestamp
-  - `active` - Whether subscription is active
-
-Database backups are automatically created before migrations and stored in the `backups/` directory.
+See `server/LICENSE` for details.

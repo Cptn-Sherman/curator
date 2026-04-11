@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Curator</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; color: #333; }
+
+        header { background: #1a1a2e; color: white; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+        header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.3px; flex: 1; }
+        .refresh-control { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94a3b8; }
+        .refresh-control select { background: #2d2d4e; color: white; border: 1px solid #4a4a6a; border-radius: 5px; padding: 4px 8px; font-size: 13px; cursor: pointer; }
+        .refresh-control select:focus { outline: none; border-color: #6366f1; }
+        #refresh-countdown { font-size: 12px; color: #64748b; min-width: 48px; text-align: right; }
+
+        nav { background: white; border-bottom: 1px solid #e5e7eb; padding: 0 24px; display: flex; }
+        .tab-btn { background: none; border: none; border-bottom: 3px solid transparent; padding: 11px 18px; cursor: pointer; font-size: 14px; color: #6b7280; transition: color 0.15s; }
+        .tab-btn:hover { color: #111; }
+        .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 500; }
+
+        main { padding: 24px; max-width: 1300px; margin: 0 auto; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
+        .stat-card { background: white; border-radius: 8px; padding: 18px 20px; border: 1px solid #e5e7eb; }
+        .stat-card .label { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.6px; }
+        .stat-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: #111; }
+
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .section-header h2 { font-size: 15px; font-weight: 600; }
+        .section-header .meta { font-size: 13px; font-weight: 400; color: #9ca3af; margin-left: 8px; }
+
+        .refresh-btn { background: white; border: 1px solid #e5e7eb; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #555; }
+        .refresh-btn:hover { background: #f9fafb; }
+
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden; }
+        th { background: #f9fafb; padding: 9px 14px; text-align: left; font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+        td { padding: 9px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fafafa; }
+
+        .url-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px; color: #555; }
+        .id-cell { font-family: monospace; font-size: 11px; color: #9ca3af; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .badge-green { background: #d1fae5; color: #065f46; }
+        .badge-gray { background: #f3f4f6; color: #6b7280; }
+        .badge-yellow { background: #fef9c3; color: #854d0e; }
+        .badge-red { background: #fee2e2; color: #991b1b; cursor: help; }
+
+        .masked { font-family: monospace; color: #9ca3af; letter-spacing: 3px; vertical-align: middle; }
+        .reveal-btn { background: none; border: none; cursor: pointer; color: #6366f1; font-size: 11px; margin-left: 6px; }
+        .reveal-btn:hover { text-decoration: underline; }
+
+        .loading { padding: 48px; text-align: center; color: #9ca3af; font-size: 14px; }
+        .empty { padding: 48px; text-align: center; color: #9ca3af; font-size: 14px; }
+        .error { padding: 14px 16px; background: #fef2f2; color: #dc2626; border-radius: 6px; font-size: 13px; border: 1px solid #fecaca; }
+
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { background: #f1f5f9; color: #374151; }
+        th.sortable.sort-asc::after  { content: ' ↑'; color: #4f46e5; }
+        th.sortable.sort-desc::after { content: ' ↓'; color: #4f46e5; }
+
+        .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; font-size: 13px; color: #6b7280; }
+        .pagination button { background: white; border: 1px solid #e5e7eb; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #374151; }
+        .pagination button:hover:not(:disabled) { background: #f9fafb; }
+        .pagination button:disabled { opacity: 0.4; cursor: default; }
+
+        .act-btn { background: white; border: 1px solid #e5e7eb; padding: 3px 9px; border-radius: 5px; cursor: pointer; font-size: 12px; color: #374151; margin-right: 3px; }
+        .act-btn:hover { background: #f9fafb; }
+        .act-btn-save { border-color: #a5b4fc; color: #4f46e5; }
+        .act-btn-save:hover { background: #eef2ff; }
+        .act-btn-cancel { color: #9ca3af; }
+        .act-btn-cancel:hover { background: #f9fafb; }
+        .act-btn-ping { color: #0284c7; border-color: #bae6fd; }
+        .act-btn-ping:hover { background: #f0f9ff; }
+        .act-btn-refresh { color: #059669; border-color: #a7f3d0; }
+        .act-btn-refresh:hover { background: #f0fdf4; }
+
+        .edit-row td { padding: 0; background: #f8fafc; }
+        .edit-form { padding: 14px 18px 18px; border-top: 1px solid #e5e7eb; }
+        .edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+        .edit-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; }
+        .edit-grid input[type="text"], .edit-grid input[type="number"] { border: 1px solid #d1d5db; border-radius: 5px; padding: 6px 10px; font-size: 13px; color: #111; background: white; }
+        .edit-grid input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px #eef2ff; }
+        .edit-grid .check-label { flex-direction: row; align-items: center; gap: 7px; text-transform: none; letter-spacing: 0; font-size: 13px; color: #374151; padding-top: 20px; cursor: pointer; }
+
+        .status-row td { font-size: 12px; padding: 5px 14px; border-bottom: 1px solid #f3f4f6; }
+        .status-row.ok  td { background: #f0fdf4; color: #166534; }
+        .status-row.err td { background: #fef2f2; color: #dc2626; }
+        .status-row.info td { background: #f0f9ff; color: #0c4a6e; }
+
+        .alias-list { display: flex; flex-wrap: wrap; gap: 5px; }
+        .alias-chip { display: inline-flex; align-items: center; gap: 3px; background: #ede9fe; color: #5b21b6; border-radius: 10px; padding: 2px 8px; font-size: 12px; }
+        .alias-remove { background: none; border: none; cursor: pointer; color: #7c3aed; font-size: 14px; line-height: 1; padding: 0 0 0 2px; opacity: 0.7; }
+        .alias-remove:hover { opacity: 1; }
+
+        .parent-chip { display: inline-flex; align-items: center; gap: 3px; background: #dbeafe; color: #1e40af; border-radius: 10px; padding: 2px 8px; font-size: 12px; }
+        .parent-remove { background: none; border: none; cursor: pointer; color: #1d4ed8; font-size: 14px; line-height: 1; padding: 0 0 0 2px; opacity: 0.7; }
+        .parent-remove:hover { opacity: 1; }
+        .count-cell { font-variant-numeric: tabular-nums; color: #374151; }
+
+        .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 18px; }
+        .settings-card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px 24px; }
+        .settings-card h3 { font-size: 13px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+        .settings-card .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+        .settings-card .setting-row:last-of-type { margin-bottom: 0; }
+        .settings-card .setting-label { color: #374151; font-size: 13px; }
+        .settings-card .setting-desc { color: #9ca3af; font-size: 12px; margin-top: 2px; }
+        .settings-card input[type="text"], .settings-card input[type="url"], .settings-card select { border: 1px solid #d1d5db; border-radius: 5px; padding: 7px 10px; font-size: 13px; color: #111; background: white; width: 100%; }
+        .settings-card input:focus, .settings-card select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px #eef2ff; }
+        .settings-card .field-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+        .settings-card .field-group label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; display: flex; flex-direction: column; gap: 4px; }
+        .settings-msg { font-size: 12px; margin-top: 10px; padding: 6px 10px; border-radius: 5px; display: none; }
+        .settings-msg.ok  { display: block; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+        .settings-msg.err { display: block; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .settings-msg.info { display: block; background: #f0f9ff; color: #0c4a6e; border: 1px solid #bae6fd; }
+        .toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-track { position: absolute; inset: 0; background: #d1d5db; border-radius: 22px; cursor: pointer; transition: background 0.2s; }
+        .toggle-track::after { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+        .toggle-switch input:checked + .toggle-track { background: #4f46e5; }
+        .toggle-switch input:checked + .toggle-track::after { transform: translateX(18px); }
+        .toggle-switch input:disabled + .toggle-track { opacity: 0.5; cursor: default; }
+        .settings-card--danger { border-color: #fca5a5; }
+        .settings-card--danger h3 { color: #dc2626; }
+        #toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: #1f2937; color: #f9fafb; border-radius: 10px; padding: 14px 20px;
+            font-size: 13px; line-height: 1.6; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+            min-width: 260px; max-width: 480px; opacity: 0; pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s; z-index: 9999; white-space: pre-line;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+        .btn-danger { background: #dc2626; color: white; border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-danger:disabled { opacity: 0.5; cursor: default; }
+        .btn-settings { background: white; border: 1px solid #d1d5db; padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; color: #374151; font-weight: 500; }
+        .btn-settings:hover:not(:disabled) { background: #f9fafb; }
+        .btn-settings:disabled { opacity: 0.5; cursor: default; }
+        .btn-settings-primary { border-color: #a5b4fc; color: #4f46e5; }
+        .btn-settings-primary:hover:not(:disabled) { background: #eef2ff; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Curator</h1>
+        <div class="refresh-control">
+            <span>Refresh</span>
+            <select id="refresh-interval">
+                <option value="0">Off</option>
+                <option value="2">2s</option>
+                <option value="5" selected>5s</option>
+                <option value="10">10s</option>
+                <option value="30">30s</option>
+                <option value="60">60s</option>
+            </select>
+            <span id="refresh-countdown"></span>
+        </div>
+    </header>
+    <nav>
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="links">Links</button>
+        <button class="tab-btn" data-tab="content">Content</button>
+        <button class="tab-btn" data-tab="creators">Creators</button>
+        <button class="tab-btn" data-tab="tags">Tags</button>
+        <button class="tab-btn" data-tab="subscriptions">Subscriptions</button>
+        <button class="tab-btn" data-tab="sources">Sources</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+    <main>
+        <div id="overview" class="tab-pane active"></div>
+        <div id="links" class="tab-pane"></div>
+        <div id="sources" class="tab-pane"></div>
+        <div id="subscriptions" class="tab-pane"></div>
+        <div id="creators" class="tab-pane"></div>
+        <div id="tags" class="tab-pane"></div>
+        <div id="content" class="tab-pane"></div>
+        <div id="settings" class="tab-pane"></div>
+    </main>
+    <script>
+        // ── Auto-refresh ──────────────────────────────────────────────────────
+        const intervalSelect = document.getElementById('refresh-interval');
+        const countdownEl = document.getElementById('refresh-countdown');
+        let refreshTimer = null;
+        let countdownTimer = null;
+        let secondsLeft = 0;
+        let activeTab = 'overview';
+
+        const saved = localStorage.getItem('refreshInterval');
+        if (saved !== null) {
+            intervalSelect.value = saved;
+        }
+
+        function startRefresh() {
+            clearInterval(refreshTimer);
+            clearInterval(countdownTimer);
+            const secs = parseInt(intervalSelect.value);
+            if (secs === 0) { countdownEl.textContent = ''; return; }
+
+            secondsLeft = secs;
+            countdownEl.textContent = `${secondsLeft}s`;
+
+            countdownTimer = setInterval(() => {
+                secondsLeft--;
+                countdownEl.textContent = secondsLeft > 0 ? `${secondsLeft}s` : '';
+            }, 1000);
+
+            refreshTimer = setInterval(() => {
+                loadTab(activeTab, true);
+                secondsLeft = secs;
+            }, secs * 1000);
+        }
+
+        intervalSelect.addEventListener('change', () => {
+            localStorage.setItem('refreshInterval', intervalSelect.value);
+            startRefresh();
+        });
+
+        // ── Tab switching ─────────────────────────────────────────────────────
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+                activeTab = btn.dataset.tab;
+                loadTab(activeTab);
+                startRefresh();
+            });
+        });
+
+        function loadTab(name, silent = false) {
+            if (name === 'overview') loadOverview(silent);
+            else if (name === 'links') loadLinks(silent);
+            else if (name === 'sources') loadSources(silent);
+            else if (name === 'subscriptions') loadSubscriptions(silent);
+            else if (name === 'creators') loadCreators(silent);
+            else if (name === 'tags') loadTags(silent);
+            else if (name === 'content') loadContent(silent);
+            else if (name === 'settings') loadSettings(silent);
+        }
+
+        function esc(s) {
+            return s == null ? '' : String(s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function fmtDate(s) { return s ? new Date(s).toLocaleString() : '-'; }
+        function badge(active) {
+            return active
+                ? '<span class="badge badge-green">Active</span>'
+                : '<span class="badge badge-gray">Inactive</span>';
+        }
+
+        async function loadOverview(silent = false) {
+            const pane = document.getElementById('overview');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const [stats, sources, subs, proc] = await Promise.all([
+                    fetch('/links/stats').then(r => r.json()),
+                    fetch('/sources').then(r => r.json()),
+                    fetch('/subscriptions').then(r => r.json()),
+                    fetch('/processing/status').then(r => r.json()),
+                ]);
+                pane.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="label">Total Links</div><div class="value">${stats.total ?? 0}</div></div>
+                        <div class="stat-card"><div class="label">Unprocessed</div><div class="value">${stats.unprocessed ?? 0}</div></div>
+                        <div class="stat-card"><div class="label">Processed</div><div class="value">${stats.processed ?? 0}</div></div>
+                        <div class="stat-card"><div class="label">Sources</div><div class="value">${sources.total_count ?? 0}</div></div>
+                        <div class="stat-card"><div class="label">Subscriptions</div><div class="value">${subs.total_count ?? 0}</div></div>
+                        <div class="stat-card"><div class="label">Processing</div><div class="value" style="font-size:15px;padding-top:8px">${proc.processing_enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-gray">Disabled</span>'}</div></div>
+                    </div>`;
+            } catch (e) {
+                pane.innerHTML = `<div class="error">Failed to load overview: ${esc(e.message)}</div>`;
+            }
+        }
+
+        // ── Links tab state ───────────────────────────────────────────────────
+        const LINKS_PAGE_SIZE = 50;
+        let linksOffset = 0;
+        let linksSortBy = 'created_at';
+        let linksSortDir = 'desc';
+
+        const LINKS_COLUMNS = [
+            { key: 'url',             label: 'URL' },
+            { key: 'created_at',      label: 'Created' },
+            { key: 'processed_at',    label: 'Processed' },
+            { key: 'source_id',       label: 'Source' },
+            { key: 'subscription_id', label: 'Subscription' },
+            { key: null,              label: 'Actions' },
+        ];
+
+        function linksSetSort(col) {
+            if (linksSortBy === col) {
+                linksSortDir = linksSortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                linksSortBy = col;
+                linksSortDir = col === 'url' ? 'asc' : 'desc';
+            }
+            linksOffset = 0;
+            loadLinks(false);
+        }
+
+        async function retryLink(id) {
+            try {
+                const res = await fetch(`/links/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) loadLinks(true);
+                else alert('Retry failed: ' + (data.error || 'unknown error'));
+            } catch (e) {
+                alert('Retry failed: ' + e.message);
+            }
+        }
+
+        async function loadLinks(silent = false) {
+            const pane = document.getElementById('links');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const params = new URLSearchParams({
+                    limit: LINKS_PAGE_SIZE,
+                    offset: linksOffset,
+                    sort_by: linksSortBy,
+                    sort_dir: linksSortDir,
+                });
+                const [data, sourcesData, subsData] = await Promise.all([
+                    fetch(`/links?${params}`).then(r => r.json()),
+                    fetch('/sources').then(r => r.json()),
+                    fetch('/subscriptions').then(r => r.json()),
+                ]);
+                const sourceMap = Object.fromEntries((sourcesData.sources || []).map(s => [s.id, s.name]));
+                const subMap = Object.fromEntries((subsData.subscriptions || []).map(s => [s.id, s.name]));
+
+                const rows = (data.links || []).map(l => {
+                    let statusCell;
+                    if (l.error) {
+                        statusCell = `<span class="badge badge-red" title="${esc(l.error)}">Failed</span>`;
+                    } else if (l.processed_at) {
+                        statusCell = fmtDate(l.processed_at);
+                    } else {
+                        statusCell = '<span class="badge badge-yellow">Pending</span>';
+                    }
+                    const retryBtn = l.error
+                        ? `<button class="act-btn" onclick="retryLink(${esc(JSON.stringify(l.id))})">Retry</button>`
+                        : '';
+                    return `<tr>
+                        <td class="url-cell" title="${esc(l.url)}"><a href="${esc(l.url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;">${esc(l.url)}</a></td>
+                        <td>${fmtDate(l.created_at)}</td>
+                        <td>${statusCell}</td>
+                        <td>${l.source_id ? esc(sourceMap[l.source_id] || l.source_id) : '-'}</td>
+                        <td>${l.subscription_id ? esc(subMap[l.subscription_id] || l.subscription_id) : '-'}</td>
+                        <td>${retryBtn}</td>
+                    </tr>`;
+                }).join('');
+
+                const theads = LINKS_COLUMNS.map(c => {
+                    if (!c.key) return `<th>${c.label}</th>`;
+                    const isActive = linksSortBy === c.key;
+                    const cls = 'sortable' + (isActive ? ` sort-${linksSortDir}` : '');
+                    return `<th class="${cls}" onclick="linksSetSort('${c.key}')">${c.label}</th>`;
+                }).join('');
+
+                const totalPages = Math.ceil(data.total / LINKS_PAGE_SIZE);
+                const currentPage = Math.floor(linksOffset / LINKS_PAGE_SIZE) + 1;
+                const hasPrev = linksOffset > 0;
+                const hasNext = linksOffset + LINKS_PAGE_SIZE < data.total;
+
+                pane.innerHTML = `
+                    <div class="section-header">
+                        <h2>Links <span class="meta">${data.total} total</span></h2>
+                        <button class="refresh-btn" onclick="loadLinks(false)">Refresh</button>
+                    </div>
+                    <table>
+                        <thead><tr>${theads}</tr></thead>
+                        <tbody>${rows || '<tr><td colspan="6" class="empty">No links yet</td></tr>'}</tbody>
+                    </table>
+                    <div class="pagination">
+                        <span>Page ${currentPage} of ${totalPages || 1}</span>
+                        <button onclick="linksOffset-=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                        <button onclick="linksOffset+=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasNext ? '' : 'disabled'}>Next →</button>
+                    </div>`;
+            } catch (e) {
+                pane.innerHTML = `<div class="error">Failed to load links: ${esc(e.message)}</div>`;
+            }
+        }
+
+        // ── Sources tab state ─────────────────────────────────────────────────
+        let sourcesCache = null;
+        let sourcesEditId = null;
+        let sourcesStatusMap = {}; // id -> { msg, cls: 'ok'|'err'|'info' }
+
+        async function loadSources(silent = false) {
+            const pane = document.getElementById('sources');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const data = await fetch('/sources').then(r => r.json());
+                sourcesCache = data;
+                // Don't clobber an in-progress edit on silent refresh
+                if (!silent || sourcesEditId === null) renderSources();
+                else { sourcesCache = data; } // data cached; DOM untouched while editing
+            } catch (e) {
+                if (!silent) pane.innerHTML = `<div class="error">Failed to load sources: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function renderSources() {
+            const pane = document.getElementById('sources');
+            const data = sourcesCache;
+            if (!data) return;
+
+            const rows = (data.sources || []).map(s => {
+                const isEditing = sourcesEditId === s.id;
+                const status = sourcesStatusMap[s.id];
+                const keyCell = s.api_key
+                    ? `<span class="masked">••••••••</span><button class="reveal-btn" data-key="${esc(s.api_key)}" onclick="toggleKey(this)">reveal</button>${s.user_id ? ` <span style="color:#9ca3af;font-size:11px">uid:${esc(s.user_id)}</span>` : ''}`
+                    : '-';
+                const rateMin = s.rate_limit_per_minute != null ? `${s.rate_limit_per_minute}/min` : '-';
+                const rateDay = s.rate_limit_per_day != null ? `${s.rate_limit_per_day}/day` : '-';
+                const actions = isEditing
+                    ? `<button class="act-btn act-btn-save" onclick="saveSourceEdit('${s.id}')">Save</button>
+                       <button class="act-btn act-btn-cancel" onclick="cancelSourceEdit()">Cancel</button>`
+                    : `<button class="act-btn" onclick="openSourceEdit('${s.id}')">Edit</button>
+                       <button class="act-btn act-btn-ping" onclick="pingSource('${s.id}')">Ping</button>
+                       <button class="act-btn act-btn-refresh" onclick="refreshSource('${s.id}')">Refresh</button>`;
+
+                let html = `<tr>
+                    <td><strong>${esc(s.name)}</strong></td>
+                    <td class="url-cell">${esc(s.domain)}</td>
+                    <td>${rateMin}</td>
+                    <td>${rateDay}</td>
+                    <td>${keyCell}</td>
+                    <td>${badge(s.active)}</td>
+                    <td>${fmtDate(s.created_at)}</td>
+                    <td style="color:#6b7280">${s.notes ? esc(s.notes) : '-'}</td>
+                    <td style="white-space:nowrap">${actions}</td>
+                </tr>`;
+
+                if (status) {
+                    html += `<tr class="status-row ${status.cls}"><td colspan="9">${esc(status.msg)}</td></tr>`;
+                }
+
+                if (isEditing) {
+                    html += `<tr class="edit-row"><td colspan="9">
+                        <div class="edit-form">
+                            <div class="edit-grid">
+                                <label>Name<input type="text" id="edit-name" value="${esc(s.name)}"></label>
+                                <label>Domain<input type="text" id="edit-domain" value="${esc(s.domain)}"></label>
+                                <label>Rate/min<input type="number" id="edit-ratemin" value="${s.rate_limit_per_minute ?? ''}" min="0"></label>
+                                <label>Rate/day<input type="number" id="edit-rateday" value="${s.rate_limit_per_day ?? ''}" min="0"></label>
+                                <label>API Key<input type="text" id="edit-apikey" value="${esc(s.api_key ?? '')}"></label>
+                                <label>User ID<input type="text" id="edit-userid" value="${esc(s.user_id ?? '')}"></label>
+                                <label>Notes<input type="text" id="edit-notes" value="${esc(s.notes ?? '')}"></label>
+                                <label class="check-label"><input type="checkbox" id="edit-active" ${s.active ? 'checked' : ''}> Active</label>
+                            </div>
+                        </div>
+                    </td></tr>`;
+                }
+
+                return html;
+            }).join('');
+
+            pane.innerHTML = `
+                <div class="section-header">
+                    <h2>Sources <span class="meta">${data.total_count} total</span></h2>
+                    <button class="refresh-btn" onclick="loadSources(false)">Refresh</button>
+                </div>
+                <table>
+                    <thead><tr><th>Name</th><th>Domain</th><th>Rate/min</th><th>Rate/day</th><th>API Key</th><th>Status</th><th>Created</th><th>Notes</th><th></th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="9" class="empty">No sources yet</td></tr>'}</tbody>
+                </table>`;
+        }
+
+        function openSourceEdit(id) {
+            sourcesEditId = id;
+            renderSources();
+        }
+
+        function cancelSourceEdit() {
+            sourcesEditId = null;
+            renderSources();
+        }
+
+        async function saveSourceEdit(id) {
+            const payload = {
+                name:                  document.getElementById('edit-name').value.trim(),
+                domain:                document.getElementById('edit-domain').value.trim(),
+                rate_limit_per_minute: document.getElementById('edit-ratemin').value !== '' ? parseInt(document.getElementById('edit-ratemin').value) : null,
+                rate_limit_per_day:    document.getElementById('edit-rateday').value !== '' ? parseInt(document.getElementById('edit-rateday').value) : null,
+                api_key:               document.getElementById('edit-apikey').value.trim() || null,
+                user_id:               document.getElementById('edit-userid').value.trim() || null,
+                notes:                 document.getElementById('edit-notes').value.trim() || null,
+                active:                document.getElementById('edit-active').checked,
+            };
+            try {
+                const r = await fetch(`/sources/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    sourcesStatusMap[id] = { msg: `Save failed: ${result.error}`, cls: 'err' };
+                    renderSources();
+                } else {
+                    sourcesEditId = null;
+                    sourcesStatusMap[id] = { msg: 'Saved', cls: 'ok' };
+                    await loadSources(true);
+                }
+            } catch (e) {
+                sourcesStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderSources();
+            }
+        }
+
+        async function pingSource(id) {
+            sourcesStatusMap[id] = { msg: 'Pinging…', cls: 'info' };
+            renderSources();
+            try {
+                const r = await fetch(`/sources/${id}/ping`, { method: 'POST' });
+                const data = await r.json();
+                if (data.reachable) {
+                    const cls = data.active ? 'ok' : 'err';
+                    const auth = data.authenticated ? ' (authenticated)' : '';
+                    sourcesStatusMap[id] = { msg: `HTTP ${data.status_code} in ${data.latency_ms}ms${auth} — marked ${data.active ? 'Active' : 'Inactive'}`, cls };
+                } else {
+                    sourcesStatusMap[id] = { msg: `Unreachable (${data.latency_ms}ms)${data.error ? ' — ' + data.error : ''} — marked Inactive`, cls: 'err' };
+                }
+            } catch (e) {
+                sourcesStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+            }
+            await loadSources(true);
+        }
+
+        async function refreshSource(id) {
+            sourcesStatusMap[id] = { msg: 'Checking for rate limit headers…', cls: 'info' };
+            renderSources();
+            try {
+                const r = await fetch(`/sources/${id}/refresh`, { method: 'POST' });
+                const data = await r.json();
+                if (data.error) {
+                    sourcesStatusMap[id] = { msg: data.error, cls: 'err' };
+                    renderSources();
+                } else {
+                    sourcesStatusMap[id] = { msg: data.message, cls: data.updated ? 'ok' : 'info' };
+                    if (data.updated) await loadSources(true);
+                    else renderSources();
+                }
+            } catch (e) {
+                sourcesStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderSources();
+            }
+        }
+
+        async function loadSubscriptions(silent = false) {
+            const pane = document.getElementById('subscriptions');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const data = await fetch('/subscriptions').then(r => r.json());
+                const rows = (data.subscriptions || []).map(s => `
+                    <tr>
+                        <td><strong>${esc(s.name)}</strong></td>
+                        <td class="url-cell" title="${esc(s.url)}">${esc(s.url)}</td>
+                        <td>${s.polling_interval_seconds}s</td>
+                        <td>${fmtDate(s.last_polled_at)}</td>
+                        <td>${badge(s.active)}</td>
+                        <td>${fmtDate(s.created_at)}</td>
+                    </tr>`).join('');
+
+                pane.innerHTML = `
+                    <div class="section-header">
+                        <h2>Subscriptions <span class="meta">${data.total_count} total</span></h2>
+                        <button class="refresh-btn" onclick="loadSubscriptions(false)">Refresh</button>
+                    </div>
+                    <table>
+                        <thead><tr><th>Name</th><th>URL</th><th>Interval</th><th>Last Polled</th><th>Status</th><th>Created</th></tr></thead>
+                        <tbody>${rows || '<tr><td colspan="6" class="empty">No subscriptions yet</td></tr>'}</tbody>
+                    </table>`;
+            } catch (e) {
+                pane.innerHTML = `<div class="error">Failed to load subscriptions: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function toggleKey(btn) {
+            const masked = btn.previousElementSibling;
+            if (btn.textContent === 'reveal') {
+                masked.textContent = btn.dataset.key;
+                masked.style.letterSpacing = 'normal';
+                btn.textContent = 'hide';
+            } else {
+                masked.textContent = '••••••••';
+                masked.style.letterSpacing = '3px';
+                btn.textContent = 'reveal';
+            }
+        }
+
+        // ── Creators tab state ─────────────────────────────────────────────────
+        let creatorsCache = null;
+        let creatorsEditId = null;
+        let creatorsStatusMap = {}; // id -> { msg, cls }
+
+        async function loadCreators(silent = false) {
+            const pane = document.getElementById('creators');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const data = await fetch('/creators').then(r => r.json());
+                creatorsCache = data;
+                if (!silent || creatorsEditId === null) renderCreators();
+            } catch (e) {
+                if (!silent) pane.innerHTML = `<div class="error">Failed to load creators: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function renderCreators() {
+            const pane = document.getElementById('creators');
+            const data = creatorsCache;
+            if (!data) return;
+
+            const rows = (data.creators || []).map(a => {
+                const isEditing = creatorsEditId === a.id;
+                const status = creatorsStatusMap[a.id];
+
+                const aliasChips = a.aliases.map(al =>
+                    `<span class="alias-chip">${esc(al)}<button class="alias-remove" onclick="removeAlias('${a.id}','${esc(al)}')" title="Remove alias">×</button></span>`
+                ).join('');
+
+                const actions = isEditing
+                    ? `<button class="act-btn act-btn-save" onclick="saveCreatorEdit('${a.id}')">Save</button>
+                       <button class="act-btn act-btn-cancel" onclick="cancelCreatorEdit()">Cancel</button>`
+                    : `<button class="act-btn" onclick="openCreatorEdit('${a.id}')">Edit</button>
+                       <button class="act-btn act-btn-cancel" style="color:#dc2626;border-color:#fecaca" onclick="deleteCreator('${a.id}', ${esc(JSON.stringify(a.name))})">Delete</button>`;
+
+                let html = `<tr>
+                    <td id="creator-name-${a.id}"><strong>${esc(a.name)}</strong></td>
+                    <td><div class="alias-list">${aliasChips || '<span style="color:#9ca3af">—</span>'}</div></td>
+                    <td>${fmtDate(a.created_at)}</td>
+                    <td style="white-space:nowrap">${actions}</td>
+                </tr>`;
+
+                if (status) {
+                    html += `<tr class="status-row ${status.cls}"><td colspan="4">${esc(status.msg)}</td></tr>`;
+                }
+
+                if (isEditing) {
+                    html += `<tr class="edit-row"><td colspan="4">
+                        <div class="edit-form">
+                            <div class="edit-grid" style="grid-template-columns: 1fr 2fr; align-items: start;">
+                                <label>Name<input type="text" id="edit-creator-name" value="${esc(a.name)}"></label>
+                                <label>Add alias
+                                    <div style="display:flex;gap:6px">
+                                        <input type="text" id="edit-alias-input" placeholder="Enter alias…" style="flex:1"
+                                               onkeydown="if(event.key==='Enter'){addAlias('${a.id}');event.preventDefault();}">
+                                        <button class="act-btn act-btn-save" style="white-space:nowrap" onclick="addAlias('${a.id}')">Add</button>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </td></tr>`;
+                }
+
+                return html;
+            }).join('');
+
+            const addForm = `
+                <div class="edit-form" style="margin-bottom:14px;background:white;border:1px solid #e5e7eb;border-radius:8px;">
+                    <div class="edit-grid" style="grid-template-columns:1fr 1fr auto;align-items:end;">
+                        <label>Name<input type="text" id="new-creator-name" placeholder="Creator name…"></label>
+                        <label>Aliases (comma-separated)<input type="text" id="new-creator-aliases" placeholder="alias1, alias2…"></label>
+                        <button class="act-btn act-btn-save" style="padding:6px 14px;font-size:13px" onclick="createCreator()">Add Creator</button>
+                    </div>
+                    <div id="new-creator-status" style="margin-top:8px;font-size:12px;display:none"></div>
+                </div>`;
+
+            pane.innerHTML = `
+                <div class="section-header">
+                    <h2>Creators <span class="meta">${data.total_count} total</span></h2>
+                    <button class="refresh-btn" onclick="loadCreators(false)">Refresh</button>
+                </div>
+                ${addForm}
+                <table>
+                    <thead><tr><th>Name</th><th>Aliases</th><th>Created</th><th></th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="4" class="empty">No creators yet</td></tr>'}</tbody>
+                </table>`;
+        }
+
+        function openCreatorEdit(id) {
+            creatorsEditId = id;
+            renderCreators();
+            document.getElementById('edit-creator-name')?.focus();
+        }
+
+        function cancelCreatorEdit() {
+            creatorsEditId = null;
+            renderCreators();
+        }
+
+        async function saveCreatorEdit(id) {
+            const name = document.getElementById('edit-creator-name').value.trim();
+            if (!name) return;
+            try {
+                const r = await fetch(`/creators/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    creatorsStatusMap[id] = { msg: result.error, cls: 'err' };
+                    renderCreators();
+                } else {
+                    creatorsEditId = null;
+                    creatorsStatusMap[id] = { msg: 'Saved', cls: 'ok' };
+                    await loadCreators(true);
+                }
+            } catch (e) {
+                creatorsStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderCreators();
+            }
+        }
+
+        async function addAlias(creatorId) {
+            const input = document.getElementById('edit-alias-input');
+            const alias = input?.value.trim();
+            if (!alias) return;
+            try {
+                const r = await fetch(`/creators/${creatorId}/aliases`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ alias }),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    creatorsStatusMap[creatorId] = { msg: result.error, cls: 'err' };
+                } else {
+                    creatorsStatusMap[creatorId] = { msg: `Added alias "${alias}"`, cls: 'ok' };
+                }
+            } catch (e) {
+                creatorsStatusMap[creatorId] = { msg: `Error: ${e.message}`, cls: 'err' };
+            }
+            await loadCreators(true);
+        }
+
+        async function removeAlias(creatorId, alias) {
+            try {
+                const r = await fetch(`/creators/${creatorId}/aliases/${encodeURIComponent(alias)}`, { method: 'DELETE' });
+                const result = await r.json();
+                if (result.error) {
+                    creatorsStatusMap[creatorId] = { msg: result.error, cls: 'err' };
+                } else {
+                    creatorsStatusMap[creatorId] = { msg: `Removed alias "${alias}"`, cls: 'ok' };
+                }
+            } catch (e) {
+                creatorsStatusMap[creatorId] = { msg: `Error: ${e.message}`, cls: 'err' };
+            }
+            await loadCreators(true);
+        }
+
+        async function deleteCreator(id, name) {
+            if (!confirm(`Delete creator "${name}" and all their aliases?`)) return;
+            try {
+                const r = await fetch(`/creators/${id}`, { method: 'DELETE' });
+                const result = await r.json();
+                if (result.error) {
+                    creatorsStatusMap[id] = { msg: result.error, cls: 'err' };
+                    renderCreators();
+                } else {
+                    await loadCreators(false);
+                }
+            } catch (e) {
+                creatorsStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderCreators();
+            }
+        }
+
+        async function createCreator() {
+            const name = document.getElementById('new-creator-name').value.trim();
+            const aliasesRaw = document.getElementById('new-creator-aliases').value.trim();
+            const statusEl = document.getElementById('new-creator-status');
+            if (!name) { statusEl.textContent = 'Name is required'; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block'; return; }
+            const aliases = aliasesRaw ? aliasesRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+            try {
+                const r = await fetch('/creators', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, aliases }),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    statusEl.textContent = result.error; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block';
+                } else {
+                    await loadCreators(false);
+                }
+            } catch (e) {
+                statusEl.textContent = `Error: ${e.message}`; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block';
+            }
+        }
+
+        // ── Tags tab state ────────────────────────────────────────────────────
+        let tagsCache = null;
+        let tagsEditId = null;
+        let tagsStatusMap = {};
+        let tagsSearch = '';
+        let tagsSort = 'name';
+        let tagsSortDir = 'asc';
+        let tagsPage = 1;
+        const TAGS_PER_PAGE = 50;
+        let tagsSearchTimer = null;
+
+        const TAGS_COLUMNS = [
+            { key: 'name',          label: 'Name'    },
+            { key: 'tag_type',      label: 'Type'    },
+            { key: 'source_id',     label: 'Source'  },
+            { key: 'content_count', label: 'Content' },
+            { key: 'created_at',    label: 'Created' },
+        ];
+
+        const TAG_TYPE_META = {
+            default:   { label: 'Default',   bg: '#f3f4f6', color: '#374151' },
+            artist:    { label: 'Creator',   bg: '#fce7f3', color: '#9d174d' },
+            publisher: { label: 'Publisher', bg: '#fef3c7', color: '#92400e' },
+            copyright: { label: 'Copyright', bg: '#ede9fe', color: '#5b21b6' },
+            character: { label: 'Character', bg: '#d1fae5', color: '#065f46' },
+            metadata:  { label: 'Metadata',  bg: '#dbeafe', color: '#1e40af' },
+        };
+
+        function tagTypeBadge(type) {
+            const m = TAG_TYPE_META[type] || TAG_TYPE_META.default;
+            return `<span style="background:${m.bg};color:${m.color};border-radius:10px;padding:2px 8px;font-size:11px;font-weight:500">${m.label}</span>`;
+        }
+
+        function tagTypeSelect(id, current) {
+            const opts = Object.entries(TAG_TYPE_META).map(([val, m]) =>
+                `<option value="${val}" ${current === val ? 'selected' : ''}>${m.label}</option>`
+            ).join('');
+            return `<select id="${id}" style="border:1px solid #d1d5db;border-radius:5px;padding:6px 10px;font-size:13px;background:white;">${opts}</select>`;
+        }
+
+        async function loadTags(silent = false) {
+            const pane = document.getElementById('tags');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const params = new URLSearchParams({
+                    search: tagsSearch,
+                    sort_by: tagsSort,
+                    sort_dir: tagsSortDir,
+                    page: tagsPage,
+                    per_page: TAGS_PER_PAGE,
+                });
+                const [tagsData, sourcesData] = await Promise.all([
+                    fetch(`/tags?${params}`).then(r => r.json()),
+                    fetch('/sources').then(r => r.json()),
+                ]);
+                tagsCache = { tags: tagsData, sources: sourcesData };
+                if (!silent || tagsEditId === null) renderTags();
+            } catch (e) {
+                if (!silent) pane.innerHTML = `<div class="error">Failed to load tags: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function tagsSetSort(key) {
+            if (tagsSort === key) {
+                tagsSortDir = tagsSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                tagsSort = key;
+                tagsSortDir = 'asc';
+            }
+            tagsPage = 1;
+            loadTags(true);
+        }
+
+        function tagsGoPage(p) {
+            tagsPage = p;
+            loadTags(true);
+        }
+
+        function onTagsSearch(val) {
+            tagsSearch = val;
+            tagsPage = 1;
+            clearTimeout(tagsSearchTimer);
+            tagsSearchTimer = setTimeout(() => loadTags(true), 300);
+        }
+
+        function renderTags() {
+            const pane = document.getElementById('tags');
+            if (!tagsCache) return;
+            const { tags: data, sources: sourcesData } = tagsCache;
+            const sourceMap = Object.fromEntries((sourcesData.sources || []).map(s => [s.id, s.name]));
+
+            const rows = (data.tags || []).map(t => {
+                const isEditing = tagsEditId === t.id;
+                const status = tagsStatusMap[t.id];
+                const sourceName = t.source_id ? (sourceMap[t.source_id] || t.source_id) : '—';
+
+                const actions = isEditing
+                    ? `<button class="act-btn act-btn-save" onclick="saveTagEdit('${t.id}')">Save</button>
+                       <button class="act-btn act-btn-cancel" onclick="cancelTagEdit()">Cancel</button>`
+                    : `<button class="act-btn" onclick="openTagEdit('${t.id}')">Edit</button>
+                       <button class="act-btn act-btn-cancel" style="color:#dc2626;border-color:#fecaca" onclick="deleteTag('${t.id}', ${esc(JSON.stringify(t.name))})">Delete</button>`;
+
+                const typeBadge = tagTypeBadge(t.tag_type);
+
+                let html = `<tr>
+                    <td><code style="font-size:12px">${esc(t.name)}</code></td>
+                    <td>${typeBadge}</td>
+                    <td>${esc(sourceName)}</td>
+                    <td class="count-cell">${t.content_count.toLocaleString()}</td>
+                    <td>${fmtDate(t.created_at)}</td>
+                    <td style="white-space:nowrap">${actions}</td>
+                </tr>`;
+
+                if (status) {
+                    html += `<tr class="status-row ${status.cls}"><td colspan="6">${esc(status.msg)}</td></tr>`;
+                }
+
+                if (isEditing) {
+                    const sourceOptions = (sourcesData.sources || []).map(s =>
+                        `<option value="${s.id}" ${t.source_id === s.id ? 'selected' : ''}>${esc(s.name)}</option>`
+                    ).join('');
+
+                    html += `<tr class="edit-row"><td colspan="6">
+                        <div class="edit-form">
+                            <div class="edit-grid" style="grid-template-columns:1fr 1fr 1fr;align-items:end;">
+                                <label>Name<input type="text" id="edit-tag-name" value="${esc(t.name)}"></label>
+                                <label>Type${tagTypeSelect('edit-tag-type', t.tag_type)}</label>
+                                <label>Source
+                                    <select id="edit-tag-source" style="border:1px solid #d1d5db;border-radius:5px;padding:6px 10px;font-size:13px;background:white;">
+                                        <option value="">— none —</option>
+                                        ${sourceOptions}
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                    </td></tr>`;
+                }
+
+                return html;
+            }).join('');
+
+            const sourceOptions = (sourcesData.sources || []).map(s =>
+                `<option value="${s.id}">${esc(s.name)}</option>`
+            ).join('');
+
+            const addForm = `
+                <div class="edit-form" style="margin-bottom:14px;background:white;border:1px solid #e5e7eb;border-radius:8px;">
+                    <div class="edit-grid" style="grid-template-columns:2fr 1fr 1fr auto;align-items:end;">
+                        <label>Name<input type="text" id="new-tag-name" placeholder="tag_name…"></label>
+                        <label>Type${tagTypeSelect('new-tag-type', 'default')}</label>
+                        <label>Source
+                            <select id="new-tag-source" style="border:1px solid #d1d5db;border-radius:5px;padding:6px 10px;font-size:13px;background:white;">
+                                <option value="">— none —</option>
+                                ${sourceOptions}
+                            </select>
+                        </label>
+                        <button class="act-btn act-btn-save" style="padding:6px 14px;font-size:13px" onclick="createTag()">Add Tag</button>
+                    </div>
+                    <div id="new-tag-status" style="margin-top:8px;font-size:12px;display:none"></div>
+                </div>`;
+
+            const theads = TAGS_COLUMNS.map(c => {
+                const isActive = tagsSort === c.key;
+                const cls = 'sortable' + (isActive ? ` sort-${tagsSortDir}` : '');
+                return `<th class="${cls}" onclick="tagsSetSort('${c.key}')">${c.label}</th>`;
+            }).join('') + '<th></th>';
+
+            const totalPages = Math.ceil(data.total_count / TAGS_PER_PAGE);
+            const hasPrev = tagsPage > 1;
+            const hasNext = tagsPage < totalPages;
+            const pageStart = data.total_count === 0 ? 0 : (tagsPage - 1) * TAGS_PER_PAGE + 1;
+            const pageEnd = Math.min(tagsPage * TAGS_PER_PAGE, data.total_count);
+
+            const pagination = totalPages > 1 ? `
+                <div class="pagination">
+                    <span>${pageStart}–${pageEnd} of ${data.total_count}</span>
+                    <button onclick="tagsGoPage(${tagsPage - 1})" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                    <span>Page ${tagsPage} of ${totalPages}</span>
+                    <button onclick="tagsGoPage(${tagsPage + 1})" ${hasNext ? '' : 'disabled'}>Next →</button>
+                </div>` : '';
+
+            pane.innerHTML = `
+                <div class="section-header">
+                    <h2>Tags <span class="meta">${data.total_count} ${tagsSearch ? 'matching' : 'total'}</span></h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="search" placeholder="Search tags…" value="${esc(tagsSearch)}"
+                            oninput="onTagsSearch(this.value)"
+                            style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 10px;font-size:13px;width:200px;">
+                        <button class="refresh-btn" onclick="loadTags(false)">Refresh</button>
+                    </div>
+                </div>
+                ${addForm}
+                <table>
+                    <thead><tr>${theads}</tr></thead>
+                    <tbody>${rows || '<tr><td colspan="6" class="empty">No tags found</td></tr>'}</tbody>
+                </table>
+                ${pagination}`;
+        }
+
+        function openTagEdit(id) {
+            tagsEditId = id;
+            renderTags();
+            document.getElementById('edit-tag-name')?.focus();
+        }
+
+        function cancelTagEdit() {
+            tagsEditId = null;
+            renderTags();
+        }
+
+        async function saveTagEdit(id) {
+            const name = document.getElementById('edit-tag-name').value.trim();
+            if (!name) return;
+            const payload = {
+                name,
+                tag_type: document.getElementById('edit-tag-type').value || 'default',
+                source_id: document.getElementById('edit-tag-source').value || null,
+            };
+            try {
+                const r = await fetch(`/tags/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    tagsStatusMap[id] = { msg: result.error, cls: 'err' };
+                    renderTags();
+                } else {
+                    tagsEditId = null;
+                    tagsStatusMap[id] = { msg: 'Saved', cls: 'ok' };
+                    await loadTags(true);
+                }
+            } catch (e) {
+                tagsStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderTags();
+            }
+        }
+
+        async function addTagParent(tagId) {
+            const input = document.getElementById('edit-parent-input');
+            const parentName = input?.value.trim();
+            if (!parentName) return;
+            try {
+                const r = await fetch(`/tags/${tagId}/parents`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ parent_name: parentName }),
+                });
+                const result = await r.json();
+                tagsStatusMap[tagId] = result.error
+                    ? { msg: result.error, cls: 'err' }
+                    : { msg: `Added parent "${parentName}"`, cls: 'ok' };
+            } catch (e) {
+                tagsStatusMap[tagId] = { msg: `Error: ${e.message}`, cls: 'err' };
+            }
+            await loadTags(true);
+        }
+
+        async function removeTagParent(tagId, parentId) {
+            try {
+                const r = await fetch(`/tags/${tagId}/parents/${parentId}`, { method: 'DELETE' });
+                const result = await r.json();
+                tagsStatusMap[tagId] = result.error
+                    ? { msg: result.error, cls: 'err' }
+                    : { msg: 'Parent removed', cls: 'ok' };
+            } catch (e) {
+                tagsStatusMap[tagId] = { msg: `Error: ${e.message}`, cls: 'err' };
+            }
+            await loadTags(true);
+        }
+
+        async function deleteTag(id, name) {
+            if (!confirm(`Delete tag "${name}"? This will also remove it as a parent from other tags.`)) return;
+            try {
+                const r = await fetch(`/tags/${id}`, { method: 'DELETE' });
+                const result = await r.json();
+                if (result.error) {
+                    tagsStatusMap[id] = { msg: result.error, cls: 'err' };
+                    renderTags();
+                } else {
+                    await loadTags(false);
+                }
+            } catch (e) {
+                tagsStatusMap[id] = { msg: `Error: ${e.message}`, cls: 'err' };
+                renderTags();
+            }
+        }
+
+        async function createTag() {
+            const name = document.getElementById('new-tag-name').value.trim();
+            const statusEl = document.getElementById('new-tag-status');
+            if (!name) { statusEl.textContent = 'Name is required'; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block'; return; }
+            const payload = {
+                name,
+                tag_type: document.getElementById('new-tag-type').value || 'default',
+                source_id: document.getElementById('new-tag-source').value || null,
+                content_count: 0,
+            };
+            try {
+                const r = await fetch('/tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await r.json();
+                if (result.error) {
+                    statusEl.textContent = result.error; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block';
+                } else {
+                    await loadTags(false);
+                }
+            } catch (e) {
+                statusEl.textContent = `Error: ${e.message}`; statusEl.style.color = '#dc2626'; statusEl.style.display = 'block';
+            }
+        }
+
+        // ── Settings tab ──────────────────────────────────────────────────────
+
+        function settingsMsg(id, text, cls) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = text;
+            el.className = `settings-msg ${cls}`;
+            if (cls === 'ok') setTimeout(() => { el.className = 'settings-msg'; }, 4000);
+        }
+
+        // ── Content tab ───────────────────────────────────────────────────────
+        let contentSearch = '';
+        let contentSort = 'created_at';
+        let contentSortDir = 'desc';
+        let contentPage = 1;
+        const CONTENT_PER_PAGE = 50;
+        let contentSearchTimer = null;
+
+        const CONTENT_COLUMNS = [
+            { key: 'file_path',  label: 'File'     },
+            { key: 'uploader',   label: 'Uploader' },
+            { key: 'rating',     label: 'Rating'   },
+            { key: 'score',      label: 'Score'    },
+            { key: 'post_date',  label: 'Posted'   },
+            { key: 'created_at', label: 'Saved'    },
+        ];
+
+        function contentSetSort(key) {
+            if (contentSort === key) {
+                contentSortDir = contentSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                contentSort = key;
+                contentSortDir = key === 'score' ? 'desc' : 'asc';
+            }
+            contentPage = 1;
+            loadContent(true);
+        }
+
+        function contentGoPage(p) { contentPage = p; loadContent(true); }
+
+        function onContentSearch(val) {
+            contentSearch = val;
+            contentPage = 1;
+            clearTimeout(contentSearchTimer);
+            contentSearchTimer = setTimeout(() => loadContent(true), 300);
+        }
+
+        async function loadContent(silent = false) {
+            const pane = document.getElementById('content');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const params = new URLSearchParams({
+                    search: contentSearch,
+                    sort_by: contentSort,
+                    sort_dir: contentSortDir,
+                    page: contentPage,
+                    per_page: CONTENT_PER_PAGE,
+                });
+                const [data, sourcesData] = await Promise.all([
+                    fetch(`/content?${params}`).then(r => r.json()),
+                    fetch('/sources').then(r => r.json()),
+                ]);
+                const sourceMap = Object.fromEntries((sourcesData.sources || []).map(s => [s.id, s.name]));
+
+                const totalPages = Math.ceil(data.total_count / CONTENT_PER_PAGE);
+                const hasPrev = contentPage > 1;
+                const hasNext = contentPage < totalPages;
+
+                const theads = CONTENT_COLUMNS.map(c => {
+                    const isActive = contentSort === c.key;
+                    const cls = 'sortable' + (isActive ? ` sort-${contentSortDir}` : '');
+                    return `<th class="${cls}" onclick="contentSetSort('${c.key}')">${c.label}</th>`;
+                }).join('') + '<th>Source</th><th>Tags</th>';
+
+                const rows = (data.content || []).map(item => {
+                    const filename = (item.file_path || '').split('/').pop() || '—';
+                    const fileCell = item.file_path
+                        ? `<span title="${esc(item.file_path)}">${esc(filename)}</span>`
+                        : '—';
+                    const sourceCell = item.source_id
+                        ? esc(sourceMap[item.source_id] || item.source_id)
+                        : '—';
+                    const tagCell = item.tags.length
+                        ? `<span class="meta" title="${esc(item.tags.join(', '))}">${item.tags.length} tags</span>`
+                        : '—';
+                    const sourceLink = item.source_url
+                        ? `<a href="${esc(item.source_url)}" target="_blank" rel="noopener" title="${esc(item.source_url)}" style="color:inherit">${esc(filename)}</a>`
+                        : fileCell;
+                    return `<tr>
+                        <td class="url-cell">${sourceLink}</td>
+                        <td>${esc(item.uploader || '—')}</td>
+                        <td>${esc(item.rating || '—')}</td>
+                        <td>${item.score != null ? item.score : '—'}</td>
+                        <td>${item.post_date ? fmtDate(item.post_date) : '—'}</td>
+                        <td>${fmtDate(item.created_at)}</td>
+                        <td>${sourceCell}</td>
+                        <td>${tagCell}</td>
+                    </tr>`;
+                }).join('');
+
+                pane.innerHTML = `
+                    <div class="section-header">
+                        <h2>Content <span class="meta">${data.total_count} ${contentSearch ? 'matching' : 'total'}</span></h2>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="search" placeholder="Search content…" value="${esc(contentSearch)}"
+                                oninput="onContentSearch(this.value)"
+                                style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:220px;">
+                            <button class="refresh-btn" onclick="loadContent(false)">Refresh</button>
+                        </div>
+                    </div>
+                    <table>
+                        <thead><tr>${theads}</tr></thead>
+                        <tbody>${rows || '<tr><td colspan="8" class="empty">No content yet</td></tr>'}</tbody>
+                    </table>
+                    <div class="pagination">
+                        <span>Page ${contentPage} of ${totalPages || 1}</span>
+                        <button onclick="contentGoPage(${contentPage - 1})" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                        <button onclick="contentGoPage(${contentPage + 1})" ${hasNext ? '' : 'disabled'}>Next →</button>
+                    </div>`;
+            } catch (e) {
+                pane.innerHTML = `<div class="error">Failed to load content: ${esc(e.message)}</div>`;
+            }
+        }
+
+        const RESET_FILES_KEY = 'curator.resetFiles';
+
+        async function loadSettings(silent = false) {
+            // Tab navigation (not a silent refresh) always resets the checkbox
+            if (!silent) sessionStorage.removeItem(RESET_FILES_KEY);
+            const pane = document.getElementById('settings');
+            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const [proc, stats, subs] = await Promise.all([
+                    fetch('/processing/status').then(r => r.json()),
+                    fetch('/links/stats').then(r => r.json()),
+                    fetch('/subscriptions').then(r => r.json()),
+                ]);
+                renderSettings(proc, stats, subs);
+            } catch (e) {
+                if (!silent) pane.innerHTML = `<div class="error">Failed to load settings: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function renderSettings(proc, stats, subs) {
+            const pane = document.getElementById('settings');
+
+            const subOptions = (subs.subscriptions || []).map(s =>
+                `<option value="${s.id}">${esc(s.name)}</option>`
+            ).join('');
+
+            pane.innerHTML = `
+                <div class="section-header" style="margin-bottom:20px">
+                    <h2>Settings</h2>
+                </div>
+                <div class="settings-grid">
+
+                    <!-- Processing -->
+                    <div class="settings-card">
+                        <h3>Processing</h3>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Enable processing</div>
+                                <div class="setting-desc">Download and process queued links</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="settings-processing-toggle" ${proc.processing_enabled ? 'checked' : ''}>
+                                <span class="toggle-track"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row" style="margin-top:10px;color:#6b7280;font-size:12px;justify-content:flex-start;gap:18px">
+                            <span>Total: <strong style="color:#111">${stats.total ?? 0}</strong></span>
+                            <span>Unprocessed: <strong style="color:#111">${stats.unprocessed ?? 0}</strong></span>
+                            <span>Processed: <strong style="color:#111">${stats.processed ?? 0}</strong></span>
+                        </div>
+                        <div id="settings-proc-msg" class="settings-msg"></div>
+                    </div>
+
+                    <!-- Ingest Link -->
+                    <div class="settings-card">
+                        <h3>Save Link</h3>
+                        <div class="field-group">
+                            <label>URL
+                                <input type="url" id="settings-ingest-url" placeholder="https://example.com">
+                            </label>
+                            <label>Subscription
+                                <select id="settings-ingest-sub">
+                                    <option value="">— none —</option>
+                                    ${subOptions}
+                                </select>
+                            </label>
+                        </div>
+                        <button class="btn-settings btn-settings-primary" onclick="settingsIngest()">Save Link</button>
+                        <div id="settings-ingest-msg" class="settings-msg"></div>
+                    </div>
+
+                    <!-- Backup -->
+                    <div class="settings-card">
+                        <h3>Backup</h3>
+                        <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Create a timestamped backup of the database file.</p>
+                        <button class="btn-settings" id="settings-backup-btn" onclick="settingsBackup()">Create Backup</button>
+                        <div id="settings-backup-msg" class="settings-msg"></div>
+                    </div>
+
+                    <!-- Danger zone -->
+                    <div class="settings-card settings-card--danger">
+                        <h3>Danger Zone</h3>
+                        <p style="font-size:13px;color:#6b7280;margin-bottom:10px">
+                            Permanently removes data from the selected tables. This cannot be undone.
+                        </p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;margin-bottom:12px">
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-links" checked style="width:15px;height:15px;"> Links
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-content" checked style="width:15px;height:15px;"> Content
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-subscriptions" checked style="width:15px;height:15px;"> Subscriptions
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-sources" style="width:15px;height:15px;"> Sources
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-creators" checked style="width:15px;height:15px;"> Creators
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+                                <input type="checkbox" id="reset-tags" checked style="width:15px;height:15px;"> Tags
+                            </label>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer;">
+                            <input type="checkbox" id="settings-reset-files" style="width:15px;height:15px;">
+                            Also delete all downloaded files from the storage directory
+                        </label>
+                        <button class="btn-danger" id="settings-reset-btn" onclick="settingsReset()">Delete Selected</button>
+                    </div>
+
+                </div>`;
+
+            document.getElementById('settings-processing-toggle').addEventListener('change', async function() {
+                this.disabled = true;
+                try {
+                    const r = await fetch('/processing/toggle', { method: 'POST' });
+                    const data = await r.json();
+                    settingsMsg('settings-proc-msg', data.message || (data.processing_enabled ? 'Processing enabled' : 'Processing disabled'), 'ok');
+                } catch (e) {
+                    this.checked = !this.checked;
+                    settingsMsg('settings-proc-msg', `Error: ${e.message}`, 'err');
+                } finally {
+                    this.disabled = false;
+                }
+            });
+
+            // Restore delete-files checkbox from sessionStorage (survives page refresh,
+            // cleared on explicit tab navigation so it always starts unchecked)
+            const filesBox = document.getElementById('settings-reset-files');
+            filesBox.checked = sessionStorage.getItem(RESET_FILES_KEY) === 'true';
+            filesBox.addEventListener('change', () => {
+                sessionStorage.setItem(RESET_FILES_KEY, filesBox.checked);
+            });
+        }
+
+        async function settingsIngest() {
+            const url = document.getElementById('settings-ingest-url').value.trim();
+            const subId = document.getElementById('settings-ingest-sub').value || undefined;
+            if (!url) { settingsMsg('settings-ingest-msg', 'Please enter a URL', 'err'); return; }
+            try {
+                const r = await fetch('/ingest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ links: [url], ...(subId && { subscription_id: subId }) }),
+                });
+                const data = await r.json();
+                if (data.ingested_count > 0) {
+                    document.getElementById('settings-ingest-url').value = '';
+                    settingsMsg('settings-ingest-msg', '✓ Link saved', 'ok');
+                } else if (data.duplicate_count > 0) {
+                    settingsMsg('settings-ingest-msg', 'Link already exists', 'info');
+                } else {
+                    settingsMsg('settings-ingest-msg', data.error || 'Failed to save link', 'err');
+                }
+            } catch (e) {
+                settingsMsg('settings-ingest-msg', `Error: ${e.message}`, 'err');
+            }
+        }
+
+        async function settingsBackup() {
+            const btn = document.getElementById('settings-backup-btn');
+            btn.disabled = true;
+            btn.textContent = 'Creating…';
+            try {
+                const r = await fetch('/backup', { method: 'POST' });
+                const data = await r.json();
+                if (data.error) {
+                    settingsMsg('settings-backup-msg', `Error: ${data.error}`, 'err');
+                } else {
+                    settingsMsg('settings-backup-msg', `✓ Saved to ${data.path}`, 'ok');
+                }
+            } catch (e) {
+                settingsMsg('settings-backup-msg', `Error: ${e.message}`, 'err');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Backup';
+            }
+        }
+
+        const RESET_TABLES = [
+            { id: 'reset-links',         param: 'clear_links',         label: 'Links' },
+            { id: 'reset-content',        param: 'clear_content',       label: 'Content' },
+            { id: 'reset-subscriptions',  param: 'clear_subscriptions', label: 'Subscriptions' },
+            { id: 'reset-sources',        param: 'clear_sources',       label: 'Sources' },
+            { id: 'reset-creators',       param: 'clear_creators',      label: 'Creators' },
+            { id: 'reset-tags',           param: 'clear_tags',          label: 'Tags' },
+        ];
+
+        async function settingsReset() {
+            const deleteFiles = document.getElementById('settings-reset-files').checked;
+            const selected = RESET_TABLES.filter(t => document.getElementById(t.id).checked);
+            if (selected.length === 0 && !deleteFiles) {
+                showToast(['Nothing selected.']);
+                return;
+            }
+            const tableList = selected.map(t => t.label).join(', ');
+            const fileWarning = deleteFiles ? '\n\nThis will also permanently delete ALL downloaded files.' : '';
+            const tableWarning = selected.length ? `tables: ${tableList}` : 'no tables';
+            if (!confirm(`This will permanently remove all data from ${tableWarning}.${fileWarning}\n\nThis cannot be undone. Continue?`)) return;
+
+            const btn = document.getElementById('settings-reset-btn');
+            btn.disabled = true;
+            try {
+                const qs = new URLSearchParams();
+                for (const t of RESET_TABLES) qs.set(t.param, document.getElementById(t.id).checked ? 'true' : 'false');
+                if (deleteFiles) qs.set('delete_files', 'true');
+                const r = await fetch('/debug/reset?' + qs.toString(), { method: 'POST' });
+                const data = await r.json();
+                const rows = [
+                    { label: 'Links',         val: data.links_deleted },
+                    { label: 'Content',       val: data.content_deleted },
+                    { label: 'Subscriptions', val: data.subscriptions_deleted },
+                    { label: 'Sources',       val: data.sources_deleted },
+                    { label: 'Creators',      val: data.creators_deleted },
+                    { label: 'Tags',          val: data.tags_deleted },
+                    { label: 'Files',         val: data.files_deleted },
+                ].filter(r => r.val > 0);
+                const lines = rows.length
+                    ? ['Deleted:', ...rows.map(r => `  ${r.label}: ${r.val.toLocaleString()}`)]
+                    : ['Nothing was deleted.'];
+                if (data.files_error) lines.push(`File error: ${data.files_error}`);
+                showToast(lines);
+                loadSettings(true);
+            } catch (e) {
+                showToast([`Error: ${e.message}`]);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Toast ──────────────────────────────────────────────────────────────
+        let _toastTimer = null;
+        function showToast(lines, durationMs = 6000) {
+            const el = document.getElementById('toast');
+            el.textContent = lines.join('\n');
+            el.classList.add('show');
+            clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => el.classList.remove('show'), durationMs);
+        }
+
+        loadOverview();
+        startRefresh();
+    </script>
+    <div id="toast"></div>
+</body>
+</html>
