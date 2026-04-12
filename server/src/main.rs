@@ -1302,6 +1302,24 @@ fn clean_url(url: &str) -> String {
         None => return url.to_string(),
     };
 
+    // For booru tag-list pages keep only page + s + tags (drop pid, credentials, etc.)
+    let is_booru_list = query.contains("page=post") && query.contains("s=list");
+    if is_booru_list {
+        const KEEP_LIST: &[&str] = &["page", "s", "tags"];
+        let kept: Vec<&str> = query
+            .split('&')
+            .filter(|p| {
+                let key = p.split('=').next().unwrap_or("").to_lowercase();
+                KEEP_LIST.contains(&key.as_str())
+            })
+            .collect();
+        return if kept.is_empty() {
+            base.to_string()
+        } else {
+            format!("{}?{}", base, kept.join("&"))
+        };
+    }
+
     // For booru post pages keep only the three identity params
     let is_booru_post = query.contains("page=post") && query.contains("s=view") && query.contains("id=");
     if is_booru_post {
@@ -2991,6 +3009,12 @@ async fn process_link(
 ) {
     info!("Processing link: {}", url);
 
+    // Booru tag-list pages → expand to individual post links, do not download directly
+    if is_booru_tag_list(url) {
+        expand_booru_tag_list(client, url, link_id, source_id, pool, flaresolverr_url, session_cache).await;
+        return;
+    }
+
     // Use the file_url already resolved by the extension, or fall back to dapi/HEAD resolution
     let (file_url, cf_session, meta) = if let Some(fu) = stored_file_url {
         info!("Using pre-resolved file_url: {}", fu);
@@ -4075,6 +4099,199 @@ async fn curl_download(url: &str, referer: &str, dest_path: &str, cf_session: Op
 }
 
 /// Extract a single query parameter value from a URL string.
+/// Returns true when `url` is a booru tag-list page (e.g. Gelbooru `?page=post&s=list&tags=…`).
+fn is_booru_tag_list(url: &str) -> bool {
+    let q = url.split_once('?').map_or("", |(_, q)| q);
+    q.contains("page=post")
+        && q.contains("s=list")
+        && extract_query_param(url, "tags").map_or(false, |t| !t.is_empty())
+}
+
+/// Minimal percent-encoder for a URL query-string value.
+/// Spaces become `+`; all other non-unreserved ASCII bytes are `%XX`-encoded.
+fn url_encode_query_value(s: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' | b'+' => out.push(byte as char),
+            b' ' => out.push('+'),
+            b => { let _ = write!(out, "%{:02X}", b); }
+        }
+    }
+    out
+}
+
+/// Page through a booru tag-list via the dapi (`?page=dapi&s=post&q=index&tags=…`),
+/// insert each discovered post as a new link in the queue, then mark the list link processed.
+async fn expand_booru_tag_list(
+    _client: &reqwest::Client,
+    list_url: &str,
+    link_id: &str,
+    source_id: Option<&str>,
+    pool: &SqlitePool,
+    flaresolverr_url: &str,
+    session_cache: &SessionCache,
+) {
+    let base = match extract_domain_base(list_url) {
+        Some(b) => b,
+        None => {
+            mark_link_error(pool, link_id, "Could not parse domain from tag list URL").await;
+            return;
+        }
+    };
+    let tags = match extract_query_param(list_url, "tags") {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            mark_link_error(pool, link_id, "Tag list URL has no tags parameter").await;
+            return;
+        }
+    };
+
+    // Look up API credentials from the source record (if one is linked)
+    let creds: Option<SourceCredentials> = if let Some(sid) = source_id {
+        sqlx::query("SELECT domain, api_key, user_id FROM sources WHERE id = ?")
+            .bind(sid)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|row| SourceCredentials {
+                domain: row.get("domain"),
+                api_key: row.get("api_key"),
+                user_id: row.get("user_id"),
+            })
+    } else {
+        None
+    };
+
+    info!("Expanding booru tag list: base='{}' tags='{}'", base, tags);
+
+    let encoded_tags = url_encode_query_value(&tags);
+    const LIMIT: u64 = 100;
+    const MAX_PAGES: u64 = 500; // safety ceiling (~50 000 posts)
+    let mut page: u64 = 0;
+    let mut total_queued: usize = 0;
+    let mut total_skipped: usize = 0;
+
+    loop {
+        if page >= MAX_PAGES {
+            tracing::warn!("Reached page limit ({}) expanding tag list '{}'", MAX_PAGES, tags);
+            break;
+        }
+
+        // Build the dapi URL, including credentials when available
+        let dapi_url = match &creds {
+            Some(c) if c.api_key.is_some() && c.user_id.is_some() => format!(
+                "{}/index.php?page=dapi&s=post&q=index&tags={}&limit={}&pid={}&json=1&api_key={}&user_id={}",
+                base, encoded_tags, LIMIT, page,
+                c.api_key.as_deref().unwrap_or(""),
+                c.user_id.as_deref().unwrap_or("")
+            ),
+            Some(c) if c.api_key.is_some() => format!(
+                "{}/index.php?page=dapi&s=post&q=index&tags={}&limit={}&pid={}&json=1&api_key={}",
+                base, encoded_tags, LIMIT, page,
+                c.api_key.as_deref().unwrap_or("")
+            ),
+            _ => format!(
+                "{}/index.php?page=dapi&s=post&q=index&tags={}&limit={}&pid={}&json=1",
+                base, encoded_tags, LIMIT, page
+            ),
+        };
+
+        info!("Tag list page {}: {}", page, dapi_url);
+
+        let body = match fetch_page_with_session(&dapi_url, &base, flaresolverr_url, session_cache).await {
+            Some((b, _)) => b,
+            None => {
+                tracing::warn!("Failed to fetch dapi page {} for tags='{}'", page, tags);
+                break;
+            }
+        };
+
+        let data: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Failed to parse dapi JSON (page {}): {}", page, e);
+                break;
+            }
+        };
+
+        let posts = match data.get("post") {
+            Some(serde_json::Value::Array(arr)) => arr.clone(),
+            _ => vec![],
+        };
+
+        if posts.is_empty() {
+            info!("No posts on page {} for tags='{}' — done", page, tags);
+            break;
+        }
+
+        let batch_len = posts.len();
+
+        for post in &posts {
+            // `id` may be a JSON integer or a string depending on site version
+            let post_id = post["id"].as_u64()
+                .or_else(|| post["id"].as_str().and_then(|s| s.parse().ok()));
+            let post_id = match post_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let post_url = clean_url(&format!("{}/index.php?page=post&s=view&id={}", base, post_id));
+
+            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM links WHERE url = ?")
+                .bind(&post_url)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0);
+
+            if exists > 0 {
+                total_skipped += 1;
+                continue;
+            }
+
+            let new_id = Uuid::new_v4().to_string();
+            let created_at = chrono::Utc::now().to_rfc3339();
+            match sqlx::query(
+                "INSERT INTO links (id, url, created_at, source_id) VALUES (?, ?, ?, ?)"
+            )
+            .bind(&new_id)
+            .bind(&post_url)
+            .bind(&created_at)
+            .bind(source_id)
+            .execute(pool)
+            .await
+            {
+                Ok(_) => total_queued += 1,
+                Err(e) => tracing::warn!("Failed to queue post {}: {}", post_url, e),
+            }
+        }
+
+        info!(
+            "Page {}: batch={} queued_so_far={} skipped_so_far={}",
+            page, batch_len, total_queued, total_skipped
+        );
+
+        if (batch_len as u64) < LIMIT {
+            break; // partial page → last page
+        }
+
+        page += 1;
+
+        // Polite delay between pages
+        let delay = rand::random::<f64>() * 2.0 + 1.0;
+        tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+    }
+
+    info!(
+        "Tag list '{}' expanded: {} posts queued, {} already existed",
+        tags, total_queued, total_skipped
+    );
+    mark_link_processed(pool, link_id).await;
+}
+
 fn extract_query_param<'a>(url: &'a str, key: &str) -> Option<String> {
     let query = url.split_once('?')?.1;
     for pair in query.split('&') {

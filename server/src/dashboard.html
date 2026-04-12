@@ -147,8 +147,8 @@
         .btn-settings-primary:hover:not(:disabled) { background: #eef2ff; }
 
         /* ── Home masonry ───────────────────────────────────────────────────── */
-        .home-masonry { columns: 220px; column-gap: 8px; margin-bottom: 20px; }
-        .home-masonry-item { break-inside: avoid; margin-bottom: 8px; }
+        .home-masonry { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 20px; }
+        .home-masonry-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
         .home-masonry-item a { display: block; border-radius: 8px; overflow: hidden; }
         .home-masonry-item img,
         .home-masonry-item video { width: 100%; display: block; border-radius: 8px; transition: opacity 0.15s; cursor: pointer; }
@@ -156,6 +156,7 @@
         .home-masonry-item a:hover video { opacity: 0.88; }
         .home-masonry-placeholder { background: #f3f4f6; border-radius: 8px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #d1d5db; }
         .home-load-more-wrap { text-align: center; margin-bottom: 20px; }
+        .home-col-slider { width: 72px; cursor: pointer; accent-color: #4f46e5; vertical-align: middle; }
 
         /* ── Dark mode ─────────────────────────────────────────────────────── */
         @media (prefers-color-scheme: dark) {
@@ -405,8 +406,20 @@
             }
         }
 
+        // ── Per-page helpers ──────────────────────────────────────────────────
+        function perPageSelect(value, onchangeFn) {
+            const opts = [25, 50, 100, 250].map(n =>
+                `<option value="${n}" ${value == n ? 'selected' : ''}>${n} / page</option>`
+            ).join('');
+            return `<select onchange="${onchangeFn}(+this.value)"
+                style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;font-size:13px;background:inherit;color:inherit;">${opts}</select>`;
+        }
+        function linksSetPageSize(n) { linksPageSize = n; localStorage.setItem('linksPageSize', n); linksOffset = 0; loadLinks(false); }
+        function tagsSetPerPage(n)   { tagsPerPage = n;   localStorage.setItem('tagsPerPage', n);   tagsPage = 1;    loadTags(true); }
+        function contentSetPerPage(n){ contentPerPage = n; localStorage.setItem('contentPerPage', n); contentPage = 1; loadContent(true); }
+
         // ── Links tab state ───────────────────────────────────────────────────
-        const LINKS_PAGE_SIZE = 50;
+        let linksPageSize = parseInt(localStorage.getItem('linksPageSize') || '50');
         let linksOffset = 0;
         let linksSortBy = 'created_at';
         let linksSortDir = 'desc';
@@ -459,7 +472,7 @@
             if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
             try {
                 const params = new URLSearchParams({
-                    limit: LINKS_PAGE_SIZE,
+                    limit: linksPageSize,
                     offset: linksOffset,
                     sort_by: linksSortBy,
                     sort_dir: linksSortDir,
@@ -502,19 +515,20 @@
                     return `<th class="${cls}" onclick="linksSetSort('${c.key}')">${c.label}</th>`;
                 }).join('');
 
-                const totalPages = Math.ceil(data.total / LINKS_PAGE_SIZE);
-                const currentPage = Math.floor(linksOffset / LINKS_PAGE_SIZE) + 1;
+                const totalPages = Math.ceil(data.total / linksPageSize);
+                const currentPage = Math.floor(linksOffset / linksPageSize) + 1;
                 const hasPrev = linksOffset > 0;
-                const hasNext = linksOffset + LINKS_PAGE_SIZE < data.total;
+                const hasNext = linksOffset + linksPageSize < data.total;
 
                 const tbody = pane.querySelector('tbody[data-id="links-tbody"]');
                 if (silent && tbody) {
                     tbody.innerHTML = rows || '<tr><td colspan="6" class="empty">No links yet</td></tr>';
                     const pg = pane.querySelector('[data-id="links-pagination"]');
                     if (pg) pg.innerHTML = `
+                        ${perPageSelect(linksPageSize, 'linksSetPageSize')}
                         <span>Page ${currentPage} of ${totalPages || 1}</span>
-                        <button onclick="linksOffset-=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasPrev ? '' : 'disabled'}>← Prev</button>
-                        <button onclick="linksOffset+=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasNext ? '' : 'disabled'}>Next →</button>`;
+                        <button onclick="linksOffset-=${linksPageSize};loadLinks(false)" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                        <button onclick="linksOffset+=${linksPageSize};loadLinks(false)" ${hasNext ? '' : 'disabled'}>Next →</button>`;
                     const cnt = pane.querySelector('[data-id="links-count"]');
                     if (cnt) cnt.textContent = `${data.total} total`;
                     // Refresh column sort indicators
@@ -534,9 +548,10 @@
                             <tbody data-id="links-tbody">${rows || '<tr><td colspan="6" class="empty">No links yet</td></tr>'}</tbody>
                         </table>
                         <div class="pagination" data-id="links-pagination">
+                            ${perPageSelect(linksPageSize, 'linksSetPageSize')}
                             <span>Page ${currentPage} of ${totalPages || 1}</span>
-                            <button onclick="linksOffset-=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasPrev ? '' : 'disabled'}>← Prev</button>
-                            <button onclick="linksOffset+=${LINKS_PAGE_SIZE};loadLinks(false)" ${hasNext ? '' : 'disabled'}>Next →</button>
+                            <button onclick="linksOffset-=${linksPageSize};loadLinks(false)" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                            <button onclick="linksOffset+=${linksPageSize};loadLinks(false)" ${hasNext ? '' : 'disabled'}>Next →</button>
                         </div>`;
                 }
             } catch (e) {
@@ -975,7 +990,7 @@
         let tagsSort = 'name';
         let tagsSortDir = 'asc';
         let tagsPage = 1;
-        const TAGS_PER_PAGE = 50;
+        let tagsPerPage = parseInt(localStorage.getItem('tagsPerPage') || '50');
         let tagsSearchTimer = null;
 
         const TAGS_COLUMNS = [
@@ -1032,7 +1047,7 @@
                     sort_by: tagsSort,
                     sort_dir: tagsSortDir,
                     page: tagsPage,
-                    per_page: TAGS_PER_PAGE,
+                    per_page: tagsPerPage,
                 });
                 const [tagsData, sourcesData] = await Promise.all([
                     fetch(`/tags?${params}`).then(r => r.json()),
@@ -1151,19 +1166,21 @@
                 return `<th class="${cls}" onclick="tagsSetSort('${c.key}')">${c.label}</th>`;
             }).join('') + '<th></th>';
 
-            const totalPages = Math.ceil(data.total_count / TAGS_PER_PAGE);
+            const totalPages = Math.ceil(data.total_count / tagsPerPage);
             const hasPrev = tagsPage > 1;
             const hasNext = tagsPage < totalPages;
-            const pageStart = data.total_count === 0 ? 0 : (tagsPage - 1) * TAGS_PER_PAGE + 1;
-            const pageEnd = Math.min(tagsPage * TAGS_PER_PAGE, data.total_count);
+            const pageStart = data.total_count === 0 ? 0 : (tagsPage - 1) * tagsPerPage + 1;
+            const pageEnd = Math.min(tagsPage * tagsPerPage, data.total_count);
 
-            const pagination = totalPages > 1 ? `
+            const pagination = `
                 <div class="pagination">
+                    ${perPageSelect(tagsPerPage, 'tagsSetPerPage')}
                     <span>${pageStart}–${pageEnd} of ${data.total_count}</span>
+                    ${totalPages > 1 ? `
                     <button onclick="tagsGoPage(${tagsPage - 1})" ${hasPrev ? '' : 'disabled'}>← Prev</button>
                     <span>Page ${tagsPage} of ${totalPages}</span>
-                    <button onclick="tagsGoPage(${tagsPage + 1})" ${hasNext ? '' : 'disabled'}>Next →</button>
-                </div>` : '';
+                    <button onclick="tagsGoPage(${tagsPage + 1})" ${hasNext ? '' : 'disabled'}>Next →</button>` : ''}
+                </div>`;
 
             const tbody = pane.querySelector('tbody[data-id="tags-tbody"]');
             if (silent && tbody) {
@@ -1329,7 +1346,7 @@
         let contentSort = 'created_at';
         let contentSortDir = 'desc';
         let contentPage = 1;
-        const CONTENT_PER_PAGE = 50;
+        let contentPerPage = parseInt(localStorage.getItem('contentPerPage') || '50');
         let contentSearchTimer = null;
 
         const CONTENT_COLUMNS = [
@@ -1378,7 +1395,7 @@
                     sort_by: contentSort,
                     sort_dir: contentSortDir,
                     page: contentPage,
-                    per_page: CONTENT_PER_PAGE,
+                    per_page: contentPerPage,
                 });
                 const [data, sourcesData] = await Promise.all([
                     fetch(`/content?${params}`).then(r => r.json()),
@@ -1386,7 +1403,7 @@
                 ]);
                 const sourceMap = Object.fromEntries((sourcesData.sources || []).map(s => [s.id, s.name]));
 
-                const totalPages = Math.ceil(data.total_count / CONTENT_PER_PAGE);
+                const totalPages = Math.ceil(data.total_count / contentPerPage);
                 const hasPrev = contentPage > 1;
                 const hasNext = contentPage < totalPages;
 
@@ -1427,6 +1444,7 @@
                 }).join('');
 
                 const pagination = `
+                    ${perPageSelect(contentPerPage, 'contentSetPerPage')}
                     <span>Page ${contentPage} of ${totalPages || 1}</span>
                     <button onclick="contentGoPage(${contentPage - 1})" ${hasPrev ? '' : 'disabled'}>← Prev</button>
                     <button onclick="contentGoPage(${contentPage + 1})" ${hasNext ? '' : 'disabled'}>Next →</button>`;
@@ -1470,6 +1488,8 @@
         const HOME_PAGE_SIZE = 40;
         let homeOffset = 0;
         let homeLoading = false;
+        let homeItemCount = 0; // total items distributed across columns so far
+        let homeColWidth = parseInt(localStorage.getItem('homeColWidth') || '220');
 
         const THUMB_ICON = { image: '🖼', video: '🎬', audio: '🎵', document: '📄' };
         function fileTypeIcon(filePath) {
@@ -1483,71 +1503,118 @@
 
         const VIDEO_EXTS = new Set(['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv']);
 
-        function renderHomeCards(items) {
-            return items.map(item => {
-                const ext = (item.file_path || '').split('.').pop().toLowerCase();
-                const icon = fileTypeIcon(item.file_path);
-                const isVideo = VIDEO_EXTS.has(ext);
-                const isGif   = ext === 'gif';
-                const id      = esc(item.id);
-                const fallback = `<div class=\\'home-masonry-placeholder\\'>${icon}</div>`;
+        // Compute how many columns fit given the current main-content width and column width setting.
+        function getHomeColCount() {
+            const w = (document.querySelector('main')?.clientWidth ?? 900) - 48;
+            return Math.max(1, Math.floor(w / homeColWidth));
+        }
 
-                let media;
-                if (isVideo) {
-                    // Show thumbnail as poster; play on hover, pause+rewind on leave
-                    media = `<video src="/content/${id}/file"
-                        poster="/content/${id}/thumbnail"
-                        muted loop playsinline preload="none"
-                        onmouseenter="this.play()"
-                        onmouseleave="this.pause();this.currentTime=0"></video>`;
-                } else if (isGif) {
-                    // Serve the original GIF so animation plays naturally
-                    media = `<img src="/content/${id}/file" loading="lazy" alt=""
-                        onerror="this.outerHTML='${fallback}'">`;
-                } else {
-                    // Static image — use the compressed JPEG thumbnail
-                    media = `<img src="/content/${id}/thumbnail" loading="lazy" alt=""
-                        onerror="this.outerHTML='${fallback}'">`;
-                }
+        // Re-distribute already-rendered items into a new column count without re-fetching.
+        function reshomeColumns(colCount) {
+            const masonry = document.querySelector('[data-id="home-masonry"]');
+            if (!masonry) return;
+            const items = Array.from(masonry.querySelectorAll('.home-masonry-item'));
+            if (!items.length) return;
+            masonry.innerHTML = Array.from({ length: colCount }, () =>
+                '<div class="home-masonry-col"></div>'
+            ).join('');
+            const cols = masonry.querySelectorAll('.home-masonry-col');
+            items.forEach((item, i) => cols[i % colCount].appendChild(item));
+            homeItemCount = items.length;
+        }
 
-                const inner = item.source_url
-                    ? `<a href="${esc(item.source_url)}" target="_blank" rel="noopener">${media}</a>`
-                    : media;
-                return `<div class="home-masonry-item">${inner}</div>`;
-            }).join('');
+        function onHomeSlider(value) {
+            homeColWidth = parseInt(value);
+            localStorage.setItem('homeColWidth', homeColWidth);
+            reshomeColumns(getHomeColCount());
+        }
+
+        // Render a single masonry item as an HTML string.
+        function renderOneHomeCard(item) {
+            const ext = (item.file_path || '').split('.').pop().toLowerCase();
+            const icon = fileTypeIcon(item.file_path);
+            const isVideo = VIDEO_EXTS.has(ext);
+            const isGif   = ext === 'gif';
+            const id      = esc(item.id);
+            const fallback = `<div class=\\'home-masonry-placeholder\\'>${icon}</div>`;
+            let media;
+            if (isVideo) {
+                media = `<video src="/content/${id}/file"
+                    poster="/content/${id}/thumbnail"
+                    muted loop playsinline preload="none"
+                    onmouseenter="this.play()"
+                    onmouseleave="this.pause();this.currentTime=0"></video>`;
+            } else if (isGif) {
+                media = `<img src="/content/${id}/file" loading="lazy" alt=""
+                    onerror="this.outerHTML='${fallback}'">`;
+            } else {
+                media = `<img src="/content/${id}/thumbnail" loading="lazy" alt=""
+                    onerror="this.outerHTML='${fallback}'">`;
+            }
+            const inner = item.source_url
+                ? `<a href="${esc(item.source_url)}" target="_blank" rel="noopener">${media}</a>`
+                : media;
+            return `<div class="home-masonry-item">${inner}</div>`;
+        }
+
+        // Append items into the explicit column divs in round-robin order.
+        // Each item is inserted at the end of its target column — nothing else moves.
+        function appendHomeItems(masonry, items) {
+            const cols = masonry.querySelectorAll('.home-masonry-col');
+            const n = cols.length;
+            if (!n || !items.length) return;
+            items.forEach((item, i) => {
+                cols[(homeItemCount + i) % n].insertAdjacentHTML('beforeend', renderOneHomeCard(item));
+            });
+            homeItemCount += items.length;
         }
 
         async function loadHome(silent = false) {
             const pane = document.getElementById('home');
-            if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
+
+            // Silent auto-refresh: only update the count badge; leave the grid alone.
+            if (silent) {
+                try {
+                    const data = await fetch('/content?sort_by=created_at&sort_dir=desc&page=1&per_page=1').then(r => r.json());
+                    const cnt = pane.querySelector('[data-id="home-count"]');
+                    if (cnt) cnt.textContent = `${data.total_count} total`;
+                } catch (_) {}
+                return;
+            }
+
+            pane.innerHTML = '<div class="loading">Loading…</div>';
             homeOffset = 0;
+            homeItemCount = 0;
             try {
                 const params = new URLSearchParams({ sort_by: 'created_at', sort_dir: 'desc', page: 1, per_page: HOME_PAGE_SIZE });
                 const data = await fetch(`/content?${params}`).then(r => r.json());
                 homeOffset = (data.content || []).length;
-                const cards = renderHomeCards(data.content || []);
                 const hasMore = data.total_count > homeOffset;
 
-                const masonry = pane.querySelector('[data-id="home-masonry"]');
-                if (silent && masonry) {
-                    masonry.innerHTML = cards || '<div class="empty">No content yet</div>';
-                    const cnt = pane.querySelector('[data-id="home-count"]');
-                    if (cnt) cnt.textContent = `${data.total_count} total`;
-                    const moreBtn = document.getElementById('home-load-more');
-                    if (moreBtn) moreBtn.parentElement.style.display = hasMore ? '' : 'none';
-                } else {
-                    pane.innerHTML = `
-                        <div class="section-header">
-                            <h2>Recent Content <span class="meta" data-id="home-count">${data.total_count} total</span></h2>
+                // Build explicit column divs so future appends never re-flow existing items
+                const colCount = getHomeColCount();
+                const colDivs = Array.from({ length: colCount }, () =>
+                    '<div class="home-masonry-col"></div>'
+                ).join('');
+
+                pane.innerHTML = `
+                    <div class="section-header">
+                        <h2>Recent Content <span class="meta" data-id="home-count">${data.total_count} total</span></h2>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <input type="range" class="home-col-slider" min="120" max="520" step="10"
+                                value="${homeColWidth}" title="Column width"
+                                oninput="onHomeSlider(this.value)">
                             <button class="refresh-btn" onclick="loadHome(false)">Refresh</button>
                         </div>
-                        <div class="home-masonry" data-id="home-masonry">${cards || '<div class="empty">No content yet</div>'}</div>
-                        <div class="home-load-more-wrap" ${hasMore ? '' : 'style="display:none"'}>
-                            <button id="home-load-more" class="refresh-btn" onclick="loadHomeMore()">Load more</button>
-                        </div>`;
-                }
+                    </div>
+                    <div class="home-masonry" data-id="home-masonry">${colDivs}</div>
+                    <div class="home-load-more-wrap" ${hasMore ? '' : 'style="display:none"'}>
+                        <button id="home-load-more" class="refresh-btn" onclick="loadHomeMore()">Load more</button>
+                    </div>`;
+
+                appendHomeItems(pane.querySelector('[data-id="home-masonry"]'), data.content || []);
             } catch (e) {
-                if (!silent) pane.innerHTML = `<div class="error">Failed to load home: ${esc(e.message)}</div>`;
+                pane.innerHTML = `<div class="error">Failed to load home: ${esc(e.message)}</div>`;
             }
         }
 
@@ -1560,15 +1627,12 @@
                 const page = Math.floor(homeOffset / HOME_PAGE_SIZE) + 1;
                 const params = new URLSearchParams({ sort_by: 'created_at', sort_dir: 'desc', page, per_page: HOME_PAGE_SIZE });
                 const data = await fetch(`/content?${params}`).then(r => r.json());
-                const grid = document.querySelector('[data-id="home-masonry"]');
-                if (grid) grid.insertAdjacentHTML('beforeend', renderHomeCards(data.content || []));
+                const masonry = document.querySelector('[data-id="home-masonry"]');
+                if (masonry) appendHomeItems(masonry, data.content || []);
                 homeOffset += (data.content || []).length;
                 if (btn) {
-                    if (homeOffset >= data.total_count) {
-                        btn.parentElement.style.display = 'none';
-                    } else {
-                        btn.textContent = 'Load more';
-                    }
+                    if (homeOffset >= data.total_count) btn.parentElement.style.display = 'none';
+                    else btn.textContent = 'Load more';
                 }
             } catch (e) {
                 if (btn) btn.textContent = 'Load more';
