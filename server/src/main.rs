@@ -75,11 +75,18 @@ struct SourcesListResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct CreatorTag {
+    name: String,
+    tag_type: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct Creator {
     id: String,
     name: String,
     created_at: String,
     aliases: Vec<String>,
+    tags: Vec<CreatorTag>,
 }
 
 #[derive(Deserialize)]
@@ -182,6 +189,7 @@ struct ContentRecord {
     source_url: Option<String>,
     source_id: Option<String>,
     created_at: String,
+    favorite: bool,
     tags: Vec<String>,
 }
 
@@ -403,7 +411,7 @@ async fn main() {
     info!("====================");
 
     // Initialize storage directories
-    for subfolder in &["image", "video", "audio", "comic", "document"] {
+    for subfolder in &["image", "video", "audio", "comic", "document", "thumbnails"] {
         let dir = std::path::Path::new(&config.storage.path).join(subfolder);
         std::fs::create_dir_all(&dir)
             .unwrap_or_else(|e| panic!("Failed to create storage directory {}: {}", dir.display(), e));
@@ -460,6 +468,11 @@ async fn main() {
         processor_loop(processor_pool, thread_pool_size, processor_state, storage_path, flaresolverr_url).await;
     });
 
+    let backup_pool = db_pool.clone();
+    tokio::spawn(async move {
+        backup_scheduler_loop(backup_pool).await;
+    });
+
     // Build router
     let app = Router::new()
         .route("/", get(handler_root))
@@ -471,6 +484,7 @@ async fn main() {
         .route("/processing/toggle", post(handler_toggle_processing))
         .route("/links/unprocessed", get(handler_unprocessed_links))
         .route("/links", get(handler_links_list))
+        .route("/links/:id", axum::routing::delete(handler_delete_link))
         .route("/links/:id/retry", post(handler_retry_link))
         .route("/subscriptions", get(handler_subscriptions_list).post(handler_create_subscription))
         .route("/sources", get(handler_sources_list).post(handler_create_source))
@@ -487,8 +501,15 @@ async fn main() {
         .route("/tags/:id/parents", post(handler_add_tag_parent))
         .route("/tags/:id/parents/:parent_id", axum::routing::delete(handler_remove_tag_parent))
         .route("/content", get(handler_content_list))
+        .route("/content/:id/file", get(handler_content_file))
+        .route("/content/:id/thumbnail", get(handler_content_thumbnail))
+        .route("/content/:id/favorite", post(handler_toggle_favorite))
+        .route("/ignored-domains", get(handler_ignored_domains_list).post(handler_add_ignored_domain))
+        .route("/ignored-domains/:domain", axum::routing::delete(handler_remove_ignored_domain))
         .route("/links/stats", get(handler_links_stats))
         .route("/backup", post(handler_backup))
+        .route("/backup/settings", get(handler_backup_settings_get).put(handler_backup_settings_put))
+        .route("/backup/list", get(handler_backup_list))
         .route("/debug/reset", post(handler_debug_reset))
         .with_state((db_pool, processing_enabled, storage_path_state));
 
@@ -980,7 +1001,77 @@ async fn init_database(db_config: &DatabaseConfig) -> Result<SqlitePool, sqlx::E
         info!("Applied migration 14: Added error column to links");
     }
 
-    info!("Database is at version {}", 14);
+    if current_version < 15 {
+        sqlx::query("ALTER TABLE content ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool).await?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO database_version (id, version, last_migration_at) VALUES (1, 15, ?)"
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await?;
+        info!("Applied migration 15: Added favorite column to content");
+    }
+
+    if current_version < 16 {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ignored_domains (
+                domain     TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            )"
+        )
+        .execute(&pool).await?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO database_version (id, version, last_migration_at) VALUES (1, 16, ?)"
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await?;
+        info!("Applied migration 16: Created ignored_domains table");
+    }
+
+    if current_version < 17 {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS backup_settings (
+                id               INTEGER PRIMARY KEY CHECK (id = 1),
+                max_backups      INTEGER NOT NULL DEFAULT 5,
+                schedule_minutes INTEGER NOT NULL DEFAULT 0,
+                last_backup_at   TEXT,
+                last_backup_path TEXT
+            )"
+        )
+        .execute(&pool).await?;
+        sqlx::query("INSERT OR IGNORE INTO backup_settings (id, max_backups, schedule_minutes) VALUES (1, 5, 0)")
+            .execute(&pool).await?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO database_version (id, version, last_migration_at) VALUES (1, 17, ?)"
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await?;
+        info!("Applied migration 17: Created backup_settings table");
+    }
+
+    if current_version < 18 {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS creator_tags (
+                creator_id TEXT NOT NULL REFERENCES creators(id),
+                tag_id     TEXT NOT NULL REFERENCES tags(id),
+                PRIMARY KEY (creator_id, tag_id)
+            )"
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO database_version (id, version, last_migration_at) VALUES (1, 18, ?)"
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await?;
+        info!("Applied migration 18: Created creator_tags table");
+    }
+
+    info!("Database is at version {}", 18);
 
     Ok(pool)
 }
@@ -1129,6 +1220,32 @@ async fn handler_links_list(
 
     info!("GET /links - total={} limit={} offset={} sort={}:{}", total, params.limit, params.offset, sort_col, sort_dir);
     Json(LinksListResponse { links, total })
+}
+
+async fn handler_delete_link(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Json<serde_json::Value> {
+    let _ = sqlx::query(
+        "DELETE FROM content_tags WHERE content_id IN (SELECT id FROM content WHERE link_id = ?)"
+    ).bind(&id).execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM content WHERE link_id = ?")
+        .bind(&id).execute(&pool).await;
+    match sqlx::query("DELETE FROM links WHERE id = ?")
+        .bind(&id)
+        .execute(&pool)
+        .await
+    {
+        Ok(r) if r.rows_affected() > 0 => {
+            info!("DELETE /links/{} - removed", id);
+            Json(json!({ "ok": true }))
+        }
+        Ok(_) => Json(json!({ "ok": false, "error": "Link not found" })),
+        Err(e) => {
+            tracing::warn!("Failed to delete link {}: {}", id, e);
+            Json(json!({ "ok": false, "error": e.to_string() }))
+        }
+    }
 }
 
 async fn handler_retry_link(
@@ -1894,11 +2011,24 @@ fn row_to_creator(r: &sqlx::sqlite::SqliteRow) -> Creator {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
+    let tags_str: Option<String> = r.try_get("tags").ok().flatten();
+    let tags = tags_str
+        .unwrap_or_default()
+        .split('|')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let mut parts = s.splitn(2, '\x1f');
+            let name = parts.next().unwrap_or("").to_string();
+            let tag_type = parts.next().unwrap_or("default").to_string();
+            CreatorTag { name, tag_type }
+        })
+        .collect();
     Creator {
         id: r.get("id"),
         name: r.get("name"),
         created_at: r.get("created_at"),
         aliases,
+        tags,
     }
 }
 
@@ -1912,7 +2042,23 @@ async fn handler_creators_list(
 
     let rows = sqlx::query(
         r#"SELECT a.id, a.name, a.created_at,
-                  GROUP_CONCAT(aa.alias, '|') AS aliases
+                  GROUP_CONCAT(aa.alias, '|') AS aliases,
+                  (SELECT GROUP_CONCAT(tg.nm, '|')
+                   FROM (
+                     SELECT DISTINCT t.name || char(31) || COALESCE(t.tag_type, 'default') AS nm
+                     FROM tags t
+                     JOIN creator_tags ct ON ct.tag_id = t.id
+                     WHERE ct.creator_id = a.id
+                     UNION
+                     SELECT DISTINCT t.name || char(31) || COALESCE(t.tag_type, 'default') AS nm
+                     FROM content c
+                     JOIN content_tags ct ON ct.content_id = c.id
+                     JOIN tags t ON t.id = ct.tag_id
+                     WHERE c.uploader = a.name
+                        OR c.uploader IN (SELECT alias FROM creator_aliases ca2 WHERE ca2.creator_id = a.id)
+                     ORDER BY nm
+                   ) tg
+                  ) AS tags
            FROM creators a
            LEFT JOIN creator_aliases aa ON aa.creator_id = a.id
            GROUP BY a.id
@@ -1967,7 +2113,23 @@ async fn handler_get_creator(
 ) -> Json<serde_json::Value> {
     match sqlx::query(
         r#"SELECT a.id, a.name, a.created_at,
-                  GROUP_CONCAT(aa.alias, '|') AS aliases
+                  GROUP_CONCAT(aa.alias, '|') AS aliases,
+                  (SELECT GROUP_CONCAT(tg.nm, '|')
+                   FROM (
+                     SELECT DISTINCT t.name || char(31) || COALESCE(t.tag_type, 'default') AS nm
+                     FROM tags t
+                     JOIN creator_tags ct ON ct.tag_id = t.id
+                     WHERE ct.creator_id = a.id
+                     UNION
+                     SELECT DISTINCT t.name || char(31) || COALESCE(t.tag_type, 'default') AS nm
+                     FROM content c
+                     JOIN content_tags ct ON ct.content_id = c.id
+                     JOIN tags t ON t.id = ct.tag_id
+                     WHERE c.uploader = a.name
+                        OR c.uploader IN (SELECT alias FROM creator_aliases ca2 WHERE ca2.creator_id = a.id)
+                     ORDER BY nm
+                   ) tg
+                  ) AS tags
            FROM creators a
            LEFT JOIN creator_aliases aa ON aa.creator_id = a.id
            WHERE a.id = ?
@@ -2185,6 +2347,7 @@ async fn handler_content_list(
         "rating"     => "c.rating",
         "score"      => "c.score",
         "source_id"  => "c.source_id",
+        "favorite"   => "c.favorite",
         _            => "c.created_at",
     };
     let sort_dir = if params.sort_dir.as_deref() == Some("asc") { "ASC" } else { "DESC" };
@@ -2193,7 +2356,7 @@ async fn handler_content_list(
 
     let query = format!(
         "SELECT c.id, c.file_path, c.post_date, c.uploader, c.rating, c.score,
-                c.source_url, c.source_id, c.created_at,
+                c.source_url, c.source_id, c.created_at, c.favorite,
                 GROUP_CONCAT(t.name, '|') AS tag_names
          FROM content c
          LEFT JOIN content_tags ct ON ct.content_id = c.id
@@ -2235,12 +2398,91 @@ async fn handler_content_list(
             source_url: r.get("source_url"),
             source_id: r.get("source_id"),
             created_at: r.get("created_at"),
+            favorite: r.get::<i64, _>("favorite") != 0,
             tags: tag_names,
         }
     }).collect();
 
     info!("GET /content - total={} search='{}' sort={}:{} page={}", total_count, params.search, sort_col, sort_dir, params.page);
     Json(ContentListResponse { content, total_count, page: params.page.max(1), per_page })
+}
+
+async fn handler_toggle_favorite(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Json<serde_json::Value> {
+    match sqlx::query_scalar::<_, i64>("SELECT favorite FROM content WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&pool)
+        .await
+    {
+        Ok(Some(current)) => {
+            let new_val = if current == 0 { 1i64 } else { 0i64 };
+            match sqlx::query("UPDATE content SET favorite = ? WHERE id = ?")
+                .bind(new_val)
+                .bind(&id)
+                .execute(&pool)
+                .await
+            {
+                Ok(_) => Json(json!({ "ok": true, "favorite": new_val != 0 })),
+                Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+            }
+        }
+        Ok(None) => Json(json!({ "ok": false, "error": "Not found" })),
+        Err(e)   => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+async fn handler_ignored_domains_list(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+) -> Json<serde_json::Value> {
+    match sqlx::query_as::<_, (String, String)>(
+        "SELECT domain, created_at FROM ignored_domains ORDER BY domain ASC"
+    )
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(rows) => {
+            let domains: Vec<_> = rows.into_iter().map(|(d, c)| json!({ "domain": d, "created_at": c })).collect();
+            Json(json!({ "domains": domains }))
+        }
+        Err(e) => Json(json!({ "domains": [], "error": e.to_string() })),
+    }
+}
+
+async fn handler_add_ignored_domain(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    Json(payload): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let domain = match payload.get("domain").and_then(|v| v.as_str()).map(|s| s.trim().to_string()) {
+        Some(d) if !d.is_empty() => d,
+        _ => return Json(json!({ "ok": false, "error": "domain is required" })),
+    };
+    let created_at = chrono::Utc::now().to_rfc3339();
+    match sqlx::query("INSERT OR IGNORE INTO ignored_domains (domain, created_at) VALUES (?, ?)")
+        .bind(&domain)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+    {
+        Ok(_)  => Json(json!({ "ok": true, "domain": domain })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+async fn handler_remove_ignored_domain(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    axum::extract::Path(domain): axum::extract::Path<String>,
+) -> Json<serde_json::Value> {
+    match sqlx::query("DELETE FROM ignored_domains WHERE domain = ?")
+        .bind(&domain)
+        .execute(&pool)
+        .await
+    {
+        Ok(r) if r.rows_affected() > 0 => Json(json!({ "ok": true })),
+        Ok(_)  => Json(json!({ "ok": false, "error": "Domain not found" })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
 }
 
 async fn handler_create_tag(
@@ -2418,9 +2660,14 @@ async fn handler_links_stats(
     }))
 }
 
-async fn handler_backup() -> Json<serde_json::Value> {
+async fn handler_backup(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+) -> Json<serde_json::Value> {
     info!("POST /backup - Creating manual backup");
+    run_backup(&pool, "manual").await
+}
 
+async fn run_backup(pool: &SqlitePool, label: &str) -> Json<serde_json::Value> {
     let config_content = match std::fs::read_to_string("config.toml") {
         Ok(c) => c,
         Err(e) => return Json(json!({ "error": format!("Failed to read config: {}", e) })),
@@ -2430,14 +2677,85 @@ async fn handler_backup() -> Json<serde_json::Value> {
         Err(e) => return Json(json!({ "error": format!("Failed to parse config: {}", e) })),
     };
 
-    let max_backups = config.database.max_backups.unwrap_or(5);
-    match create_backup(&config.database.name, "manual", max_backups).await {
+    // Use max_backups from db settings, falling back to config
+    let max_backups: i64 = sqlx::query_scalar("SELECT max_backups FROM backup_settings WHERE id = 1")
+        .fetch_optional(pool).await.ok().flatten()
+        .unwrap_or(config.database.max_backups.unwrap_or(5) as i64);
+
+    match create_backup(&config.database.name, label, max_backups as usize).await {
         Ok(path) => {
-            info!("Manual backup created: {}", path);
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = sqlx::query("UPDATE backup_settings SET last_backup_at = ?, last_backup_path = ? WHERE id = 1")
+                .bind(&now).bind(&path).execute(pool).await;
+            info!("Backup created: {}", path);
             Json(json!({ "success": true, "path": path }))
         }
         Err(e) => Json(json!({ "error": format!("Backup failed: {}", e) })),
     }
+}
+
+async fn handler_backup_settings_get(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+) -> Json<serde_json::Value> {
+    match sqlx::query(
+        "SELECT max_backups, schedule_minutes, last_backup_at, last_backup_path FROM backup_settings WHERE id = 1"
+    )
+    .fetch_optional(&pool).await
+    {
+        Ok(Some(r)) => Json(json!({
+            "max_backups":      r.get::<i64, _>("max_backups"),
+            "schedule_minutes": r.get::<i64, _>("schedule_minutes"),
+            "last_backup_at":   r.get::<Option<String>, _>("last_backup_at"),
+            "last_backup_path": r.get::<Option<String>, _>("last_backup_path"),
+        })),
+        _ => Json(json!({ "max_backups": 5, "schedule_minutes": 0, "last_backup_at": null, "last_backup_path": null })),
+    }
+}
+
+async fn handler_backup_settings_put(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    Json(payload): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let max_backups = payload.get("max_backups").and_then(|v| v.as_i64()).unwrap_or(5).max(1).min(100);
+    let schedule_minutes = payload.get("schedule_minutes").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+    match sqlx::query("UPDATE backup_settings SET max_backups = ?, schedule_minutes = ? WHERE id = 1")
+        .bind(max_backups).bind(schedule_minutes).execute(&pool).await
+    {
+        Ok(_)  => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+async fn handler_backup_list(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+) -> Json<serde_json::Value> {
+    let row = sqlx::query(
+        "SELECT max_backups, schedule_minutes, last_backup_at, last_backup_path FROM backup_settings WHERE id = 1"
+    )
+    .fetch_optional(&pool).await.ok().flatten();
+
+    let (max_backups, schedule_minutes, last_backup_at, last_backup_path) = match row {
+        Some(r) => (
+            r.get::<i64, _>("max_backups"),
+            r.get::<i64, _>("schedule_minutes"),
+            r.get::<Option<String>, _>("last_backup_at"),
+            r.get::<Option<String>, _>("last_backup_path"),
+        ),
+        None => (5, 0, None, None),
+    };
+
+    // Count actual backup files on disk
+    let backup_count = std::fs::read_dir("backups")
+        .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).count())
+        .unwrap_or(0);
+
+    Json(json!({
+        "max_backups": max_backups,
+        "schedule_minutes": schedule_minutes,
+        "last_backup_at": last_backup_at,
+        "last_backup_path": last_backup_path,
+        "backup_count": backup_count,
+    }))
 }
 
 /// Recursively delete all regular files under `dir`, counting deletions.
@@ -2531,6 +2849,43 @@ async fn handler_debug_reset(
         "files_deleted": files_deleted,
         "files_error": files_error,
     }))
+}
+
+async fn backup_scheduler_loop(pool: SqlitePool) {
+    // Check every minute whether a scheduled backup is due.
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+
+        let row = sqlx::query(
+            "SELECT schedule_minutes, last_backup_at FROM backup_settings WHERE id = 1"
+        )
+        .fetch_optional(&pool).await;
+
+        let (schedule_minutes, last_backup_at): (i64, Option<String>) = match row {
+            Ok(Some(r)) => (r.get("schedule_minutes"), r.get("last_backup_at")),
+            _ => continue,
+        };
+
+        if schedule_minutes <= 0 { continue; }
+
+        let due = match last_backup_at {
+            None => true,
+            Some(ts) => {
+                match chrono::DateTime::parse_from_rfc3339(&ts) {
+                    Ok(last) => {
+                        let elapsed = chrono::Utc::now().signed_duration_since(last.with_timezone(&chrono::Utc));
+                        elapsed.num_minutes() >= schedule_minutes
+                    }
+                    Err(_) => true,
+                }
+            }
+        };
+
+        if due {
+            info!("Scheduled backup triggered (interval: {}m)", schedule_minutes);
+            run_backup(&pool, "scheduled").await;
+        }
+    }
 }
 
 async fn processor_loop(pool: SqlitePool, thread_pool_size: usize, processing_enabled: Arc<Mutex<bool>>, storage_path: String, flaresolverr_url: String) {
@@ -2675,7 +3030,7 @@ async fn process_link(
     match download_file(client, &file_url, storage_path, url, cf_session.as_ref()).await {
         Ok(saved_path) => {
             info!("Saved {} -> {}", url, saved_path);
-            create_content(pool, link_id, source_id, &saved_path, &meta).await;
+            create_content(pool, link_id, source_id, &saved_path, &meta, storage_path).await;
             mark_link_processed(pool, link_id).await;
         }
         Err(e) => {
@@ -2710,6 +3065,143 @@ async fn mark_link_error(pool: &SqlitePool, link_id: &str, msg: &str) {
     }
 }
 
+/// Stream the original downloaded file for a content item.
+async fn handler_content_file(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if id.len() > 64 || id.chars().any(|c| !c.is_ascii_alphanumeric() && c != '-') {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let file_path = match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT file_path FROM content WHERE id = ?"
+    )
+    .bind(&id)
+    .fetch_optional(&pool)
+    .await
+    {
+        Ok(Some(Some(p))) => p,
+        _ => return axum::http::StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let ext = file_path.rsplit('.').next().unwrap_or("").to_lowercase();
+    let content_type = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png"          => "image/png",
+        "gif"          => "image/gif",
+        "webp"         => "image/webp",
+        "avif"         => "image/avif",
+        "bmp"          => "image/bmp",
+        "tiff"         => "image/tiff",
+        "mp4"          => "video/mp4",
+        "webm"         => "video/webm",
+        "mkv"          => "video/x-matroska",
+        "avi"          => "video/x-msvideo",
+        "mov"          => "video/quicktime",
+        "flv"          => "video/x-flv",
+        "mp3"          => "audio/mpeg",
+        "flac"         => "audio/flac",
+        "ogg"          => "audio/ogg",
+        "wav"          => "audio/wav",
+        "aac"          => "audio/aac",
+        "opus"         => "audio/opus",
+        "pdf"          => "application/pdf",
+        _              => "application/octet-stream",
+    };
+
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(f) => f,
+        Err(_) => return axum::http::StatusCode::NOT_FOUND.into_response(),
+    };
+    let stream = tokio_util::io::ReaderStream::new(file);
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, content_type)
+        .header(axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(axum::body::Body::from_stream(stream))
+        .unwrap()
+}
+
+/// Serve a pre-generated JPEG thumbnail for a content item.
+async fn handler_content_thumbnail(
+    axum::extract::State((_, _, storage_path)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // Reject anything that isn't a plain UUID to prevent path traversal
+    if id.len() > 64 || id.chars().any(|c| !c.is_ascii_alphanumeric() && c != '-') {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let id_chars: Vec<char> = id.chars().collect();
+    let s1 = format!("{}{}", id_chars.get(0).copied().unwrap_or('0'), id_chars.get(1).copied().unwrap_or('0'));
+    let s2 = format!("{}{}", id_chars.get(2).copied().unwrap_or('0'), id_chars.get(3).copied().unwrap_or('0'));
+    let thumb_path = format!("{}/thumbnails/{}/{}/{}.jpg", storage_path, s1, s2, id);
+    match tokio::fs::read(&thumb_path).await {
+        Ok(data) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "image/jpeg"),
+                (axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            ],
+            data,
+        ).into_response(),
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Generate a JPEG thumbnail for an image file (CPU-bound, run in spawn_blocking).
+fn generate_image_thumbnail(file_path: &str, thumb_path: &str) -> Result<(), String> {
+    let img = image::open(file_path).map_err(|e| e.to_string())?;
+    let thumb = img.thumbnail(400, 400);
+    thumb.save(thumb_path).map_err(|e| e.to_string())
+}
+
+/// Generate a JPEG thumbnail for a video file using ffmpeg.
+async fn generate_video_thumbnail(file_path: &str, thumb_path: &str) {
+    let out = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-ss", "00:00:01", "-i", file_path,
+               "-vframes", "1", "-vf", "scale=400:-2", "-q:v", "3", thumb_path])
+        .output()
+        .await;
+    match out {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => tracing::warn!("ffmpeg thumbnail failed: {}", String::from_utf8_lossy(&o.stderr)),
+        Err(e) => tracing::warn!("ffmpeg not available for thumbnail: {}", e),
+    }
+}
+
+/// Generate and save a thumbnail for the given file, keyed by content_id.
+async fn generate_thumbnail(content_id: &str, file_path: &str, storage_path: &str) {
+    let ext = file_path.rsplit('.').next().unwrap_or("").to_lowercase();
+    let id_chars: Vec<char> = content_id.chars().collect();
+    let s1 = format!("{}{}", id_chars.get(0).copied().unwrap_or('0'), id_chars.get(1).copied().unwrap_or('0'));
+    let s2 = format!("{}{}", id_chars.get(2).copied().unwrap_or('0'), id_chars.get(3).copied().unwrap_or('0'));
+    let thumb_dir = format!("{}/thumbnails/{}/{}", storage_path, s1, s2);
+    let thumb_path = format!("{}/{}.jpg", thumb_dir, content_id);
+    if let Err(e) = tokio::fs::create_dir_all(&thumb_dir).await {
+        tracing::warn!("Could not create thumbnail dir {}: {}", thumb_dir, e);
+        return;
+    }
+    if tokio::fs::metadata(&thumb_path).await.is_ok() {
+        return; // already generated
+    }
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" => {
+            let fp = file_path.to_string();
+            let tp = thumb_path.clone();
+            match tokio::task::spawn_blocking(move || generate_image_thumbnail(&fp, &tp)).await {
+                Ok(Ok(())) => info!("Thumbnail generated for content {}", content_id),
+                Ok(Err(e)) => tracing::warn!("Image thumbnail failed for {}: {}", content_id, e),
+                Err(e) => tracing::warn!("Thumbnail task panicked for {}: {}", content_id, e),
+            }
+        }
+        "mp4" | "webm" | "mkv" | "avi" | "mov" | "flv" => {
+            generate_video_thumbnail(file_path, &thumb_path).await;
+            info!("Video thumbnail generated for content {}", content_id);
+        }
+        _ => {} // audio, documents, unknown — no thumbnail
+    }
+}
+
 /// Create a content row and link its tags, finding or creating each tag as needed.
 async fn create_content(
     pool: &SqlitePool,
@@ -2717,6 +3209,7 @@ async fn create_content(
     source_id: Option<&str>,
     file_path: &str,
     meta: &PostMetadata,
+    storage_path: &str,
 ) {
     let content_id = Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -2748,12 +3241,12 @@ async fn create_content(
     // Find or create each tag, then link it to this content entry
     for (tag_name, tag_type) in &meta.tags {
         let tag_id = find_or_create_tag(pool, tag_name, tag_type, source_id).await;
-        if let Some(tag_id) = tag_id {
+        if let Some(ref tid) = tag_id {
             let _ = sqlx::query(
                 "INSERT OR IGNORE INTO content_tags (content_id, tag_id) VALUES (?, ?)"
             )
             .bind(&content_id)
-            .bind(&tag_id)
+            .bind(tid)
             .execute(pool)
             .await;
 
@@ -2761,11 +3254,69 @@ async fn create_content(
             let _ = sqlx::query(
                 "UPDATE tags SET content_count = content_count + 1 WHERE id = ?"
             )
-            .bind(&tag_id)
+            .bind(tid)
             .execute(pool)
             .await;
+
+            // Auto-create/link a creator entry for any artist-type tag
+            if tag_type == "artist" {
+                ensure_creator_for_artist_tag(pool, tag_name, tid).await;
+            }
         }
     }
+
+    generate_thumbnail(&content_id, file_path, storage_path).await;
+}
+
+/// For an artist tag, ensure a creator entry exists and the tag is linked in creator_tags.
+async fn ensure_creator_for_artist_tag(pool: &SqlitePool, tag_name: &str, tag_id: &str) {
+    // Resolve existing creator id by name or alias
+    let creator_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM creators WHERE name = ?
+         UNION
+         SELECT creator_id FROM creator_aliases WHERE alias = ?
+         LIMIT 1"
+    )
+    .bind(tag_name)
+    .bind(tag_name)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    let creator_id = match creator_id {
+        Some(id) => id,
+        None => {
+            // Create a new creator
+            let new_id = Uuid::new_v4().to_string();
+            let created_at = chrono::Utc::now().to_rfc3339();
+            match sqlx::query(
+                "INSERT OR IGNORE INTO creators (id, name, created_at) VALUES (?, ?, ?)"
+            )
+            .bind(&new_id)
+            .bind(tag_name)
+            .bind(&created_at)
+            .execute(pool)
+            .await
+            {
+                Ok(_) => info!("Auto-created creator '{}' from artist tag", tag_name),
+                Err(e) => {
+                    tracing::warn!("Failed to auto-create creator '{}': {}", tag_name, e);
+                    return;
+                }
+            }
+            new_id
+        }
+    };
+
+    // Link the tag to the creator
+    let _ = sqlx::query(
+        "INSERT OR IGNORE INTO creator_tags (creator_id, tag_id) VALUES (?, ?)"
+    )
+    .bind(&creator_id)
+    .bind(tag_id)
+    .execute(pool)
+    .await;
 }
 
 /// Return an existing tag's id by name+source, or create a new tag and return its id.
@@ -2870,8 +3421,14 @@ async fn resolve_file_url(
 /// Returns true if `s` looks like a Cloudflare challenge page rather than real API JSON.
 /// Used to decide whether to retry via FlareSolverr.
 fn looks_like_cf(s: &str) -> bool {
-    let t = s.trim_start();
-    t.starts_with('<') || t.contains("Just a moment") || t.contains("cf-browser-verification")
+    // A Cloudflare challenge page contains one or more of these strings.
+    // Do NOT check starts_with('<') — every valid HTML page also starts with '<'.
+    s.contains("Just a moment")
+        || s.contains("cf-browser-verification")
+        || s.contains("Checking if the site connection is secure")
+        || s.contains("Enable JavaScript and cookies to continue")
+        || s.contains("cf_chl_opt")
+        || s.contains("challenges.cloudflare.com")
 }
 
 /// Fetch a booru post page, reusing or acquiring a Cloudflare clearance session.
@@ -2950,9 +3507,13 @@ async fn resolve_booru_file_url(
     };
 
     let tags = extract_tags_from_html(&html);
-    info!("Post {}: file_url found, {} tags parsed", post_id, tags.len());
+    let (post_date, uploader, rating, score) = extract_post_metadata_from_html(&html);
+    info!(
+        "Post {}: file_url found, {} tags, uploader={:?} rating={:?} score={:?} date={:?}",
+        post_id, tags.len(), uploader, rating, score, post_date
+    );
 
-    Some((file_url, cf_session, PostMetadata { tags, ..Default::default() }))
+    Some((file_url, cf_session, PostMetadata { tags, post_date, uploader, rating, score, ..Default::default() }))
 }
 
 /// Extract the highest-quality file URL from a booru post page's HTML.
@@ -3060,6 +3621,72 @@ fn extract_file_url_from_html(html: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Extract post metadata (date, uploader, rating, score) from a booru post page.
+///
+/// Targets the statistics sidebar present on Gelbooru-compatible sites:
+/// ```html
+/// <li>Posted: <a href="...">2024-01-15 10:30:00</a> by <a href="...">username</a></li>
+/// <li>Rating: <span>General</span></li>
+/// <li>Score: <span id="score">42</span></li>
+/// ```
+fn extract_post_metadata_from_html(html: &str) -> (Option<String>, Option<String>, Option<String>, Option<i64>) {
+    let lower = html.to_ascii_lowercase();
+
+    // ── Score ──────────────────────────────────────────────────────────────
+    // <span id="score">42</span>
+    let score: Option<i64> = lower.find("id=\"score\"").and_then(|pos| {
+        let after = &html[pos..];
+        let gt = after.find('>')?;
+        let text = &after[gt + 1..];
+        let end = text.find('<').unwrap_or(text.len().min(20));
+        text[..end].trim().parse().ok()
+    });
+
+    // ── Rating ─────────────────────────────────────────────────────────────
+    // "Rating: " followed by plain text or wrapped in a tag, e.g.:
+    //   <li>Rating: General</li>
+    //   <li>Rating: <span>Safe</span></li>
+    let rating: Option<String> = lower.find("rating: ").and_then(|pos| {
+        let after = &html[pos + 8..];
+        let trimmed = after.trim_start();
+        let slice = if trimmed.starts_with('<') {
+            let gt = trimmed.find('>')?;
+            &trimmed[gt + 1..]
+        } else {
+            trimmed
+        };
+        let end = slice.find(|c: char| c == '<' || c == '\n').unwrap_or(slice.len().min(40));
+        let r = decode_html_entities(slice[..end].trim());
+        if r.is_empty() || r.len() > 40 { None } else { Some(r) }
+    });
+
+    // ── Posted date ────────────────────────────────────────────────────────
+    // Pattern: "Posted: 2023-03-30 12:15:35<br>"  (plain text, no wrapping anchor)
+    let post_date: Option<String> = lower.find("posted:").and_then(|pos| {
+        let after = &html[pos + 7..]; // skip "posted:"
+        let trimmed = after.trim_start();
+        let end = trimmed.find(|c: char| c == '<' || c == '\n').unwrap_or(trimmed.len().min(30));
+        let d = trimmed[..end].trim().to_string();
+        if d.is_empty() { None } else { Some(d) }
+    });
+
+    // ── Uploader ───────────────────────────────────────────────────────────
+    // Pattern: "Uploader: <a href="...">username</a>"
+    let uploader: Option<String> = lower.find("uploader:").and_then(|pos| {
+        let after = &html[pos + 9..]; // skip "uploader:"
+        let lower_after = after.to_ascii_lowercase();
+        let a_rel = lower_after.find("<a ").or_else(|| lower_after.find("<a\t"))?;
+        let a_chunk = &after[a_rel..];
+        let gt = a_chunk.find('>')?;
+        let text = &a_chunk[gt + 1..];
+        let end = text.find('<').unwrap_or(text.len().min(80));
+        let u = decode_html_entities(text[..end].trim());
+        if u.is_empty() { None } else { Some(u) }
+    });
+
+    (post_date, uploader, rating, score)
 }
 
 /// Extract `(tag_name, tag_type)` pairs from a booru post page's HTML sidebar.

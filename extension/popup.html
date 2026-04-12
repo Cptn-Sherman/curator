@@ -26,31 +26,14 @@
 
         <!-- Save Tab -->
         <div id="save" class="tab-content active">
-            <div class="form-group">
-                <label for="url">URL:</label>
-                <input type="text" id="url" placeholder="https://example.com">
-            </div>
-
-            <div class="form-group">
-                <label for="subscription">Subscription:</label>
-                <select id="subscription">
-                    <option value="">No Subscription</option>
-                </select>
-            </div>
-
-            <div class="button-group">
-                <button id="save-link-btn" class="btn btn-primary">Save</button>
-                <button id="save-close-btn" class="btn btn-secondary">Save & Close Tab</button>
-            </div>
-            <div id="save-message" class="message"></div>
-
-            <div class="save-batch-divider"></div>
-
             <div class="batch-toolbar">
                 <div class="batch-selection-controls">
                     <button id="batch-select-all" class="btn-link">Select all</button>
                     <span class="batch-sep">·</span>
                     <button id="batch-deselect-all" class="btn-link">Deselect all</button>
+                    <span class="batch-sep">·</span>
+                    <label class="scope-radio"><input type="radio" name="tab-scope" value="all"> All windows</label>
+                    <label class="scope-radio"><input type="radio" name="tab-scope" value="current"> This window</label>
                 </div>
                 <span id="batch-selected-count" class="batch-count">0 selected</span>
             </div>
@@ -62,6 +45,7 @@
                 <button id="batch-save-btn" class="btn btn-primary" disabled>Save Selected</button>
                 <button id="batch-save-close-btn" class="btn btn-secondary" disabled>Save & Close</button>
             </div>
+            <button id="save-current-btn" class="btn btn-secondary save-current-btn">Save Current Page</button>
         </div>
 
         <!-- Status Tab -->
@@ -117,14 +101,6 @@
                 </div>
                 <button id="settings-save-url-btn" class="btn btn-primary">Save URL</button>
                 <div id="settings-url-message" class="message"></div>
-            </div>
-
-            <div class="settings-section">
-                <h3>Tabs</h3>
-                <div class="radio-group">
-                    <label><input type="radio" name="tab-scope" value="all"> All windows</label>
-                    <label><input type="radio" name="tab-scope" value="current"> Current window</label>
-                </div>
             </div>
 
             <div class="settings-section">

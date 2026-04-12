@@ -88,88 +88,50 @@ function stopStatusRefresh() {
 
 // ── Save tab ──────────────────────────────────────────────────────────────────
 
-document.getElementById('save-link-btn').addEventListener('click', () => saveLink(false));
-document.getElementById('save-close-btn').addEventListener('click', () => saveLink(true));
-
 function initializePopup() {
-    browser.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        document.getElementById('url').value = tabs[0].url;
-        document.getElementById('server-url').textContent = curatorUrl;
-        loadSaveSubscriptions();
-        document.getElementById('url').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') saveLink();
-        });
-        loadBatchTabs();
+    browser.storage.local.get(['tabScope'], result => {
+        const scope = result.tabScope || 'all';
+        const radio = document.querySelector(`input[name="tab-scope"][value="${scope}"]`);
+        if (radio) radio.checked = true;
     });
+    document.getElementById('server-url').textContent = curatorUrl;
+    loadBatchTabs();
 }
 
-async function loadSaveSubscriptions() {
+document.getElementById('save-current-btn').addEventListener('click', saveCurrentPage);
+
+async function saveCurrentPage() {
+    const btn = document.getElementById('save-current-btn');
+    const msgEl = document.getElementById('batch-message');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
     try {
-        const response = await fetch(`${curatorUrl}/subscriptions`);
-        const data = await response.json();
-        const select = document.getElementById('subscription');
-        const currentValue = select.value;
-        select.innerHTML = '<option value="">No Subscription</option>';
-        if (data.subscriptions && data.subscriptions.length > 0) {
-            data.subscriptions.forEach(sub => {
-                const option = document.createElement('option');
-                option.value = sub.id;
-                option.textContent = sub.name;
-                select.appendChild(option);
-            });
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !isSaveableUrl(tab.url)) {
+            showMessage('Current page cannot be saved', 'error', msgEl, 3000);
+            return;
         }
-        select.value = currentValue;
-    } catch (error) {
-        console.error('Failed to load subscriptions:', error);
-    }
-}
-
-async function saveLink(andClose = false) {
-    const url = document.getElementById('url').value.trim();
-    const subscriptionId = document.getElementById('subscription').value || undefined;
-    const messageEl = document.getElementById('save-message');
-
-    if (!url) {
-        showMessage('Please enter a URL', 'error', messageEl);
-        return;
-    }
-
-    const saveBtn = document.getElementById('save-link-btn');
-    const closeBtn = document.getElementById('save-close-btn');
-    saveBtn.disabled = true;
-    closeBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-
-    try {
         const response = await fetch(`${curatorUrl}/ingest`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ links: [url], ...(subscriptionId && { subscription_id: subscriptionId }) }),
+            body: JSON.stringify({ links: [tab.url] }),
             mode: 'cors',
             credentials: 'omit'
         });
         const data = await response.json();
         if (data.ingested_count > 0) {
-            if (andClose) {
-                browser.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                    browser.tabs.remove(tabs[0].id);
-                });
-                return;
-            }
-            showMessage('✓ Link saved successfully', 'success', messageEl);
-            document.getElementById('url').value = '';
-            if (document.getElementById('status').classList.contains('active')) setTimeout(loadStatus, 500);
+            showMessage('✓ Current page saved', 'success', msgEl, 3000);
+            boostProgressPolling();
         } else if (data.duplicate_count > 0) {
-            showMessage('⚠ Link already exists', 'info', messageEl);
+            showMessage('⚠ Already saved', 'info', msgEl, 3000);
         } else {
-            showMessage('Failed to save link', 'error', messageEl);
+            showMessage('Failed to save page', 'error', msgEl, 3000);
         }
-    } catch (error) {
-        showMessage(`Error: ${error.message}`, 'error', messageEl);
+    } catch (err) {
+        showMessage(`Error: ${err.message}`, 'error', msgEl, 3000);
     } finally {
-        saveBtn.disabled = false;
-        closeBtn.disabled = false;
-        saveBtn.textContent = 'Save';
+        btn.disabled = false;
+        btn.textContent = 'Save Current Page';
     }
 }
 
@@ -233,11 +195,6 @@ async function loadStatus() {
 
 function loadSettingsTab() {
     document.getElementById('settings-url').value = curatorUrl;
-    browser.storage.local.get(['tabScope'], result => {
-        const scope = result.tabScope || 'all';
-        const radio = document.querySelector(`input[name="tab-scope"][value="${scope}"]`);
-        if (radio) radio.checked = true;
-    });
     loadSettingsSubscriptions();
     loadIgnoredDomains();
 }
@@ -245,6 +202,7 @@ function loadSettingsTab() {
 document.querySelectorAll('input[name="tab-scope"]').forEach(radio => {
     radio.addEventListener('change', () => {
         browser.storage.local.set({ tabScope: radio.value });
+        loadBatchTabs();
     });
 });
 
@@ -299,8 +257,6 @@ async function loadSettingsSubscriptions() {
         } else {
             list.innerHTML = '<div class="list-empty">No subscriptions yet.</div>';
         }
-        // also refresh the save tab dropdown
-        loadSaveSubscriptions();
     } catch (error) {
         list.innerHTML = '<div class="list-empty">Unable to load subscriptions.</div>';
     }
@@ -354,11 +310,16 @@ function clearSubscriptionForm() {
     document.getElementById('sub-interval').value = '3600';
 }
 
-// Ignored domains
-function loadIgnoredDomains() {
-    browser.storage.local.get(['ignoredDomains'], (result) => {
-        renderIgnoredDomains(result.ignoredDomains || []);
-    });
+// Ignored domains — stored server-side for persistence across extension reinstalls
+async function loadIgnoredDomains() {
+    const list = document.getElementById('ignored-domains-list');
+    try {
+        const data = await fetch(`${curatorUrl}/ignored-domains`).then(r => r.json());
+        const domains = (data.domains || []).map(d => d.domain);
+        renderIgnoredDomains(domains);
+    } catch {
+        list.innerHTML = '<div class="list-empty">Could not load (server unreachable).</div>';
+    }
 }
 
 function renderIgnoredDomains(domains) {
@@ -374,30 +335,27 @@ function renderIgnoredDomains(domains) {
         item.innerHTML = `
             <div class="list-item-name">${escapeHtml(domain)}</div>
             <button class="btn-remove" title="Remove">✕</button>`;
-        item.querySelector('.btn-remove').addEventListener('click', () => {
-            browser.storage.local.get(['ignoredDomains'], result => {
-                const updated = (result.ignoredDomains || []).filter(d => d !== domain);
-                browser.storage.local.set({ ignoredDomains: updated }, () => renderIgnoredDomains(updated));
-            });
+        item.querySelector('.btn-remove').addEventListener('click', async () => {
+            await fetch(`${curatorUrl}/ignored-domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+            loadIgnoredDomains();
         });
         list.appendChild(item);
     });
 }
 
-function addIgnoredDomain() {
+async function addIgnoredDomain() {
     const input = document.getElementById('ignored-domain-input');
     const raw = input.value.trim().toLowerCase();
     if (!raw) return;
     let domain = raw;
     try { domain = new URL(raw.includes('://') ? raw : `https://${raw}`).hostname; } catch {}
-    browser.storage.local.get(['ignoredDomains'], (result) => {
-        const domains = result.ignoredDomains || [];
-        if (!domains.includes(domain)) {
-            domains.push(domain);
-            browser.storage.local.set({ ignoredDomains: domains }, () => renderIgnoredDomains(domains));
-        }
-        input.value = '';
+    await fetch(`${curatorUrl}/ignored-domains`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain }),
     });
+    input.value = '';
+    loadIgnoredDomains();
 }
 
 document.getElementById('add-ignored-domain-btn').addEventListener('click', addIgnoredDomain);
@@ -457,8 +415,11 @@ document.getElementById('debug-reset-btn').addEventListener('click', async () =>
 
 let batchSavedTabIds = [];
 
+const ALWAYS_IGNORED_DOMAINS = new Set(['localhost', '127.0.0.1', '::1']);
+
 function isSaveableUrl(url) {
-    return url && (url.startsWith('http://') || url.startsWith('https://'));
+    if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) return false;
+    try { return !ALWAYS_IGNORED_DOMAINS.has(new URL(url).hostname); } catch { return false; }
 }
 
 function getDomain(url) {
@@ -505,12 +466,13 @@ function loadBatchTabs() {
     batchSavedTabIds = [];
 
     Promise.all([
-        browser.storage.local.get(['ignoredDomains', 'tabScope']),
-    ]).then(([stored]) => {
+        browser.storage.local.get(['tabScope']),
+        fetch(`${curatorUrl}/ignored-domains`).then(r => r.json()).catch(() => ({ domains: [] })),
+    ]).then(([stored, ignoredData]) => {
         const query = stored.tabScope === 'current' ? { currentWindow: true } : {};
-        return Promise.all([browser.tabs.query(query), Promise.resolve(stored)]);
-    }).then(([tabs, stored]) => {
-        const ignoredDomains = new Set(stored.ignoredDomains || []);
+        return Promise.all([browser.tabs.query(query), Promise.resolve(stored), Promise.resolve(ignoredData)]);
+    }).then(([tabs, stored, ignoredData]) => {
+        const ignoredDomains = new Set((ignoredData.domains || []).map(d => d.domain));
         const groups = new Map();
         for (const tab of tabs) {
             if (!isSaveableUrl(tab.url)) continue;
@@ -518,7 +480,12 @@ function loadBatchTabs() {
             if (!groups.has(domain)) groups.set(domain, []);
             groups.get(domain).push(tab);
         }
-        const sorted = new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+        const sorted = new Map([...groups.entries()].sort(([a], [b]) => {
+            const aIgnored = ignoredDomains.has(a) ? 1 : 0;
+            const bIgnored = ignoredDomains.has(b) ? 1 : 0;
+            if (aIgnored !== bIgnored) return aIgnored - bIgnored;
+            return a.localeCompare(b);
+        }));
 
         list.innerHTML = '';
         if (sorted.size === 0) {
@@ -551,13 +518,18 @@ function loadBatchTabs() {
             ignoreBtn.className = 'batch-ignore-btn';
             ignoreBtn.title = ignored ? 'Remove from ignored' : 'Always ignore this domain';
             ignoreBtn.textContent = ignored ? 'unignore' : 'ignore';
-            ignoreBtn.addEventListener('click', e => {
+            ignoreBtn.addEventListener('click', async e => {
                 e.stopPropagation();
-                browser.storage.local.get(['ignoredDomains'], result => {
-                    let domains = result.ignoredDomains || [];
-                    domains = ignoredDomains.has(domain) ? domains.filter(d => d !== domain) : [...domains, domain];
-                    browser.storage.local.set({ ignoredDomains: domains }, () => loadBatchTabs());
-                });
+                if (ignoredDomains.has(domain)) {
+                    await fetch(`${curatorUrl}/ignored-domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+                } else {
+                    await fetch(`${curatorUrl}/ignored-domains`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ domain }),
+                    });
+                }
+                loadBatchTabs();
             });
 
             header.appendChild(domainCb);

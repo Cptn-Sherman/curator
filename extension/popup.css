@@ -4,14 +4,19 @@
     box-sizing: border-box;
 }
 
-body {
+html, body {
     width: 500px;
+    height: 580px;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background: #f5f5f5;
     color: #333;
 }
 
 .container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
     padding: 0;
 }
 
@@ -22,6 +27,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .header h1 {
@@ -51,6 +57,7 @@ body {
     padding: 6px 14px;
     background: #f0f0f8;
     border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
 }
 
 .progress-bar-track {
@@ -90,6 +97,7 @@ body {
     display: flex;
     background: white;
     border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
 }
 
 .tab-btn {
@@ -121,7 +129,34 @@ body {
 }
 
 .tab-content.active {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Save tab: batch list grows, buttons stay pinned — no outer scroll */
+#save.tab-content.active {
+    overflow: hidden;
+}
+
+#save .batch-toolbar {
+    flex-shrink: 0;
+}
+
+#save #batch-message {
+    flex-shrink: 0;
+}
+
+#save .batch-actions {
+    flex-shrink: 0;
+    padding-top: 8px;
+}
+
+.save-current-btn {
+    flex-shrink: 0;
+    margin-top: 8px;
 }
 
 .form-group {
@@ -438,10 +473,6 @@ body {
     word-break: break-all;
 }
 
-.save-batch-divider {
-    border-top: 1px solid #e8e8e8;
-    margin: 16px -20px 14px;
-}
 
 .batch-toolbar {
     display: flex;
@@ -467,6 +498,16 @@ body {
 
 .btn-link:hover { text-decoration: underline; }
 
+.scope-radio {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    color: #555;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
 .batch-sep { color: #ccc; font-size: 12px; }
 
 .batch-count {
@@ -476,7 +517,8 @@ body {
 }
 
 .batch-list {
-    max-height: 300px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     margin-bottom: 10px;
     border: 1px solid #eee;
@@ -611,4 +653,116 @@ body {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* ── Dark mode ───────────────────────────────────────────────────────────────
+   Matches the dashboard's dark palette: #1a1a2e header, #111827 body,
+   #1e2030 surface, #252d3d raised surface, #374151 borders, #6366f1 accent.
+*/
+@media (prefers-color-scheme: dark) {
+    html, body {
+        background: #111827;
+        color: #f3f4f6;
+    }
+
+    /* Header: flat dark navy, matching dashboard header */
+    .header {
+        background: #1a1a2e;
+    }
+
+    /* Progress strip */
+    .progress-strip {
+        background: #1e2030;
+        border-bottom-color: #2d3748;
+    }
+    .progress-bar-track { background: #2d3748; }
+    .progress-label { color: #9ca3af; }
+
+    /* Tab bar */
+    .tabs {
+        background: #1e2030;
+        border-bottom-color: #2d3748;
+    }
+    .tab-btn { background: #1e2030; color: #9ca3af; }
+    .tab-btn:hover { background: #252d3d; }
+    .tab-btn.active { color: #6366f1; border-bottom-color: #6366f1; }
+
+    /* Tab content */
+    .tab-content { background: #1a1f2e; }
+
+    /* Inputs & selects */
+    .form-group input,
+    .form-group select,
+    .ignored-add-row input {
+        background: #252d3d;
+        border-color: #374151;
+        color: #f3f4f6;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .ignored-add-row input:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+    .form-group label { color: #9ca3af; }
+
+    /* Buttons */
+    .btn-secondary { background: #2d3748; color: #e5e7eb; }
+    .btn-secondary:hover { background: #374151; }
+    .btn-link { color: #818cf8; }
+
+    /* Messages */
+    .message.success { background: #052e16; color: #4ade80; border-color: #166534; }
+    .message.error   { background: #2d0f0f; color: #f87171; border-color: #991b1b; }
+    .message.info    { background: #0c1a2e; color: #93c5fd; border-color: #1e40af; }
+
+    /* Status tab */
+    .status-item { border-bottom-color: #2d3748; }
+    .status-item span:first-child { color: #9ca3af; }
+    .status-item span:last-child  { color: #f3f4f6; }
+    .status-section h3 { color: #6b7280; }
+
+    /* Settings tab */
+    .settings-section h3 { color: #6b7280; }
+    .settings-help { color: #6b7280; }
+    .settings-section--debug { border-top-color: #4b1c1c; }
+    .settings-section--debug h3 { color: #f87171; }
+    .radio-group label { color: #e5e7eb; }
+    .subscription-form { background: #252d3d; }
+
+    /* List items (subscriptions, ignored domains) */
+    .list-item { background: #252d3d; border-left-color: #6366f1; }
+    .list-item-name { color: #f3f4f6; }
+    .list-item-url  { color: #6b7280; }
+    .list-empty { color: #6b7280; }
+    .btn-remove { color: #4b5563; }
+    .btn-remove:hover { color: #f87171; }
+
+    /* Batch save tab */
+    .batch-toolbar { color: #9ca3af; }
+    .batch-sep { color: #4b5563; }
+    .batch-count { color: #9ca3af; }
+    .scope-radio { color: #9ca3af; }
+
+    .batch-list { border-color: #2d3748; }
+    .batch-empty { color: #6b7280; }
+    .batch-domain-group { border-bottom-color: #2d3748; }
+    .batch-domain-header { background: #1e2030; }
+    .batch-domain-name { color: #e5e7eb; }
+    .batch-domain-count { background: #2d3748; color: #9ca3af; }
+
+    .batch-ignore-btn { border-color: #374151; color: #6b7280; }
+    .batch-ignore-btn:hover { border-color: #f87171; color: #f87171; }
+    .batch-domain-ignored .batch-ignore-btn { border-color: #6366f1; color: #6366f1; }
+    .batch-domain-ignored .batch-domain-header { background: #161b28; opacity: 0.7; }
+
+    .batch-tab-row:hover { background: #1e2030; }
+    .batch-tab-title { color: #e5e7eb; }
+    .batch-tab-url   { color: #6b7280; }
+
+    .batch-domain-header input[type="checkbox"],
+    .batch-tab-row input[type="checkbox"] { accent-color: #6366f1; }
+
+    /* Loading spinner */
+    .loading { border-color: #2d3748; border-top-color: #6366f1; }
 }
