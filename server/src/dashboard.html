@@ -382,16 +382,35 @@
                 : '<span class="badge badge-gray">Inactive</span>';
         }
 
+        function fmtBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+            const val = bytes / Math.pow(1024, i);
+            return (i === 0 ? val : val.toFixed(1)) + ' ' + units[i];
+        }
+
         async function loadOverview(silent = false) {
             const pane = document.getElementById('overview');
             if (!silent) pane.innerHTML = '<div class="loading">Loading…</div>';
             try {
-                const [stats, sources, subs, proc] = await Promise.all([
+                const [stats, sources, subs, proc, cstats] = await Promise.all([
                     fetch('/links/stats').then(r => r.json()),
                     fetch('/sources').then(r => r.json()),
                     fetch('/subscriptions').then(r => r.json()),
                     fetch('/processing/status').then(r => r.json()),
+                    fetch('/content/stats').then(r => r.json()),
                 ]);
+
+                const typeRows = (cstats.by_type || [])
+                    .slice().sort((a, b) => b.size - a.size)
+                    .map(t => `<tr>
+                        <td><code style="font-size:12px">.${esc(t.ext)}</code></td>
+                        <td style="text-align:right">${t.count.toLocaleString()}</td>
+                        <td style="text-align:right">${fmtBytes(t.size)}</td>
+                    </tr>`
+                ).join('') || '<tr><td colspan="3" class="empty">No files yet</td></tr>';
+
                 pane.innerHTML = `
                     <div class="stats-grid">
                         <div class="stat-card"><div class="label">Total Links</div><div class="value">${stats.total ?? 0}</div></div>
@@ -400,7 +419,20 @@
                         <div class="stat-card"><div class="label">Sources</div><div class="value">${sources.total_count ?? 0}</div></div>
                         <div class="stat-card"><div class="label">Subscriptions</div><div class="value">${subs.total_count ?? 0}</div></div>
                         <div class="stat-card"><div class="label">Processing</div><div class="value" style="font-size:15px;padding-top:8px">${proc.processing_enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-gray">Disabled</span>'}</div></div>
-                    </div>`;
+                        <div class="stat-card"><div class="label">Total Files</div><div class="value">${(cstats.total_files ?? 0).toLocaleString()}</div></div>
+                        <div class="stat-card"><div class="label">Collection Size</div><div class="value" style="font-size:20px;padding-top:10px">${fmtBytes(cstats.total_size ?? 0)}</div></div>
+                    </div>
+                    <div class="section-header" style="margin-top:8px">
+                        <h2>Files by Type</h2>
+                    </div>
+                    <table>
+                        <thead><tr>
+                            <th>Extension</th>
+                            <th style="text-align:right">Count</th>
+                            <th style="text-align:right">Size on Disk</th>
+                        </tr></thead>
+                        <tbody>${typeRows}</tbody>
+                    </table>`;
             } catch (e) {
                 pane.innerHTML = `<div class="error">Failed to load overview: ${esc(e.message)}</div>`;
             }

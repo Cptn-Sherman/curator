@@ -501,6 +501,7 @@ async fn main() {
         .route("/tags/:id/parents", post(handler_add_tag_parent))
         .route("/tags/:id/parents/:parent_id", axum::routing::delete(handler_remove_tag_parent))
         .route("/content", get(handler_content_list))
+        .route("/content/stats", get(handler_content_stats))
         .route("/content/:id/file", get(handler_content_file))
         .route("/content/:id/thumbnail", get(handler_content_thumbnail))
         .route("/content/:id/favorite", post(handler_toggle_favorite))
@@ -2675,6 +2676,44 @@ async fn handler_links_stats(
         "total": total,
         "unprocessed": unprocessed,
         "processed": total - unprocessed,
+    }))
+}
+
+async fn handler_content_stats(
+    axum::extract::State((pool, _, _)): axum::extract::State<(SqlitePool, Arc<Mutex<bool>>, String)>,
+) -> Json<serde_json::Value> {
+    let file_paths: Vec<String> = sqlx::query_scalar(
+        "SELECT file_path FROM content WHERE file_path IS NOT NULL"
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+
+    let mut by_type: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+    let mut total_size: u64 = 0;
+
+    for path in &file_paths {
+        let ext = path.rsplit('.').next().unwrap_or("unknown").to_lowercase();
+        let size = tokio::fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
+        total_size += size;
+        let entry = by_type.entry(ext).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += size;
+    }
+
+    let mut type_list: Vec<serde_json::Value> = by_type
+        .into_iter()
+        .map(|(ext, (count, size))| json!({ "ext": ext, "count": count, "size": size }))
+        .collect();
+    type_list.sort_by(|a, b| {
+        b["count"].as_u64().unwrap_or(0).cmp(&a["count"].as_u64().unwrap_or(0))
+    });
+
+    info!("GET /content/stats - {} files, {} bytes", file_paths.len(), total_size);
+    Json(json!({
+        "total_files": file_paths.len(),
+        "total_size": total_size,
+        "by_type": type_list,
     }))
 }
 
